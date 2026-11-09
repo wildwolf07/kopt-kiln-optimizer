@@ -19,17 +19,19 @@ interpreter/timing model. These are aggregate ratios, not geometric means or
 hidden-test predictions. The `optimizer-integrated` candidate combines the
 core at `64574bd`, memory-fact scheduling from `e818222`, and additional tested
 allocation, counted-loop, layout and correctness changes. The `optimizer-best`
-branch adds loop-nest flattening, irreducible-cycle splitting, min/max and
-Horner regrouping, counting selects, load phis, store selects and
-return-block copying.
+branch adds loop-nest flattening, irreducible-cycle splitting, closed forms
+for summation loops, population-count and bit-reverse idioms, state-machine
+dispatch tables, division by constants, min/max and Horner regrouping,
+counting selects, load phis, store selects, return-block copying and
+profile-guided timing inputs.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 11,194 | 9.26x |
-| few_registers | 202,164 | 25,592 | 17,482 | 11.56x |
-| no_fused | 107,966 | 20,218 | 14,021 | 7.70x |
-| slow_memory | 111,254 | 24,319 | 15,905 | 7.00x |
-| wide_fast | 55,744 | 12,923 | 8,847 | 6.30x |
+| default | 103,671 | 16,527 | 10,185 | 10.18x |
+| few_registers | 202,164 | 25,592 | 15,937 | 12.69x |
+| no_fused | 107,966 | 20,218 | 13,103 | 8.24x |
+| slow_memory | 111,254 | 24,319 | 15,161 | 7.34x |
+| wide_fast | 55,744 | 12,923 | 7,901 | 7.06x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
