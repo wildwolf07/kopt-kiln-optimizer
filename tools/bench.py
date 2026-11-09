@@ -98,6 +98,17 @@ def check_one(job):
         c0, _ = cycles_of(cp0, sample, mc, 5000000)
         c1, _ = cycles_of(cp1, sample, mc, 5000000)
         row["c0"], row["c1"] = c0, c1
+        # Held-out generated inputs (a seed kopt never sees): a less noisy
+        # estimate than the single sample input.
+        r0 = r1 = 0
+        for inp in K.generate_inputs(len(orig.params), 8, seed + 7919):
+            x0, _ = cycles_of(cp0, inp, mc, 2000000)
+            x1, _ = cycles_of(cp1, inp, mc, 2000000)
+            if x0 is None or x1 is None:
+                continue
+            r0 += x0
+            r1 += x1
+        row["r0"], row["r1"] = r0, r1
         row["n0"], row["n1"] = len(orig.instrs), len(opt.instrs)
         if not identity:
             out2 = os.path.join(td, "out2.kir")
@@ -151,7 +162,8 @@ def main():
     by_m = {}
     for r in good:
         by_m.setdefault(r["machine"], []).append(r)
-    print("\n%-14s %5s %12s %12s %8s %8s" % ("machine", "ok", "cycles_in", "cycles_out", "total_x", "geo_x"))
+    print("\n%-14s %5s %12s %12s %8s %8s %12s %8s" % ("machine", "ok", "cycles_in", "cycles_out", "total_x", "geo_x",
+                                                   "rand_out", "rgeo_x"))
     for m in mnames:
         rs = by_m.get(m, [])
         if not rs:
@@ -159,7 +171,9 @@ def main():
         s0 = sum(r["c0"] for r in rs)
         s1 = sum(r["c1"] for r in rs)
         geo = math.exp(sum(math.log(r["c0"] / max(1, r["c1"])) for r in rs) / len(rs))
-        print("%-14s %5d %12d %12d %8.3f %8.3f" % (m, len(rs), s0, s1, s0 / max(1, s1), geo))
+        rsum = sum(r["r1"] for r in rs)
+        rgeo = math.exp(sum(math.log(max(1, r["r0"]) / max(1, r["r1"])) for r in rs) / len(rs))
+        print("%-14s %5d %12d %12d %8.3f %8.3f %12d %8.3f" % (m, len(rs), s0, s1, s0 / max(1, s1), geo, rsum, rgeo))
     if a.save:
         import json
         with open(a.save, "w") as f:
