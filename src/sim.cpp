@@ -358,6 +358,78 @@ uint64_t SimProgram::cycles(const std::vector<uint32_t> &trace, const Machine &m
     return static_cast<uint64_t>(last + 1);
 }
 
+SimProgram::Breakdown SimProgram::breakdown(const std::vector<uint32_t> &trace, const Machine &mc) const {
+    // Same model as cycles(), with counters. Kept separate so cycles() stays lean.
+    Breakdown bd;
+    const int W = mc.issue_width, MP = mc.mem_ports, K = mc.registers;
+    const int SP = mc.reg_spill_penalty, TB = mc.taken_branch_penalty;
+    const uint32_t IC = static_cast<uint32_t>(mc.icache_size);
+    const int ICP = mc.icache_penalty;
+    std::vector<int64_t> ready(nregs_, 0);
+    const bool track = nregs_ > K;
+    std::vector<uint64_t> lastUse(nregs_, 0);
+    std::vector<uint8_t> resident(nregs_, 0), spilled(nregs_, 0);
+    uint64_t tick = 0;
+    int nres = 0;
+    auto makeResident = [&](int r) {
+        if (nres >= K) {
+            int victim = -1;
+            for (int q = 0; q < nregs_; q++)
+                if (resident[q] && (victim < 0 || lastUse[q] < lastUse[victim])) victim = q;
+            resident[victim] = 0;
+            spilled[victim] = 1;
+            nres--;
+        }
+        resident[r] = 1;
+        lastUse[r] = ++tick;
+        nres++;
+    };
+    if (track)
+        for (int r = 0; r < nparams_; r++) makeResident(r);
+    int64_t last = 0, fence = 0;
+    int used = 0, memused = 0;
+    for (size_t idx = 0; idx < trace.size(); idx++) {
+        const uint32_t pc = trace[idx];
+        bd.instrs++;
+        int64_t F = 0;
+        if (pc >= IC) { F += ICP; bd.icacheMisses++; }
+        const int *tch = &touch_[pc * 4];
+        if (track)
+            for (int q = 0; q < 4 && tch[q] >= 0; q++) {
+                int r = tch[q];
+                if (resident[r]) lastUse[r] = ++tick;
+                else {
+                    if (spilled[r]) { F += SP; spilled[r] = 0; bd.spillTouches++; }
+                    makeResident(r);
+                }
+            }
+        int64_t t = last + F;
+        int64_t tf = std::max(t, fence);
+        if (tf > t) bd.fenceStall += static_cast<uint64_t>(tf - t);
+        t = tf;
+        int64_t td = t;
+        const int *rs = &srcs_[pc * 3];
+        for (int q = 0; q < 3; q++) if (rs[q] >= 0 && ready[rs[q]] > td) td = ready[rs[q]];
+        const int d = dst_[pc];
+        if (d >= 0 && ready[d] > td) td = ready[d];
+        if (td > t) bd.dataStall += static_cast<uint64_t>(td - t);
+        t = td;
+        const Op op = code_[pc].op;
+        const bool m = isMemOp(op);
+        if (t == last && (used >= W || (m && memused >= MP))) { t += 1; bd.slotStall++; }
+        if (t > last) { used = 0; memused = 0; }
+        used++;
+        if (m) memused++;
+        last = t;
+        if (d >= 0) ready[d] = t + mc.latency(op);
+        if (isTerminator(op) && idx + 1 < trace.size() && trace[idx + 1] != pc + 1) {
+            fence = t + 1 + TB;
+            bd.takenJumps++;
+        }
+    }
+    return bd;
+}
+
 std::string compareRuns(const RunResult &a, const RunResult &b) {
     if (a.status != b.status) return "status differs";
     if (a.status == Status::RET && a.value != b.value) return "return value differs";

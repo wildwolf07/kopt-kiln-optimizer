@@ -124,9 +124,16 @@ int simMode(int argc, char **argv) {
     in.args.resize(p.params.size(), 0);
     SimProgram sp(p);
     RunResult r = sp.run(in, 5000000, true);
-    printf("%s cycles=%llu steps=%llu instrs=%zu regs=%d\n", describe(r),
+    printf("%s cycles=%llu steps=%llu instrs=%zu regs=%d", describe(r),
            static_cast<unsigned long long>(r.status == Status::TIMEOUT ? 0 : sp.cycles(r.trace, m)),
            static_cast<unsigned long long>(r.steps), sp.size(), sp.numRegs());
+    if (r.status != Status::TIMEOUT) {
+        SimProgram::Breakdown b = sp.breakdown(r.trace, m);
+        printf(" taken=%llu fence=%llu data=%llu slot=%llu spills=%llu icache=%llu",
+               (unsigned long long)b.takenJumps, (unsigned long long)b.fenceStall, (unsigned long long)b.dataStall,
+               (unsigned long long)b.slotStall, (unsigned long long)b.spillTouches, (unsigned long long)b.icacheMisses);
+    }
+    printf("\n");
     return 0;
 }
 

@@ -77,6 +77,12 @@ public:
     RunResult run(const Input &in, uint64_t maxSteps, bool wantTrace) const;
     // Exact cycle count of a finished run (needs a trace).
     uint64_t cycles(const std::vector<uint32_t> &trace, const Machine &m) const;
+    // Where the cycles go (developer diagnostics).
+    struct Breakdown {
+        uint64_t instrs = 0, takenJumps = 0, spillTouches = 0, icacheMisses = 0;
+        uint64_t fenceStall = 0, dataStall = 0, slotStall = 0;
+    };
+    Breakdown breakdown(const std::vector<uint32_t> &trace, const Machine &m) const;
     int numRegs() const { return nregs_; }
     size_t size() const { return code_.size(); }
 

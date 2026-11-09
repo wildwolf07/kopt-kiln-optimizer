@@ -578,6 +578,8 @@ bool simplifyOne(Func &f, const std::vector<DefSite> &ds, Inst &x, Opnd *repl, b
         if (B.isC(0)) { *repl = Opnd::cst(0); return true; }
         if (B.isC(1)) { *repl = A; return true; }
         if (B.isC(0xFFFFFFFFu)) return setOp(OP_SUB, Opnd::cst(0), A);
+        // x * 2^k == x << k (mod 2^32); fuseOps turns it back on machines where mul is faster.
+        if (B.isConst && isPow2(B.c)) return setOp(OP_SHL, A, Opnd::cst(log2u(B.c)));
         if (B.isConst && dA && dA->op == OP_MUL && dA->a[1].isConst)
             return setOp(OP_MUL, dA->a[0], Opnd::cst(dA->a[1].c * B.c));
         if (B.isConst && dA && dA->op == OP_SHL && dA->a[1].isConst)
@@ -1003,9 +1005,267 @@ bool deadStores(Func &f) {
     return changed;
 }
 
-// Implemented in later files.
-bool licm(Func &) { return false; }
-bool fuseOps(Func &, const Machine &) { return false; }
-bool ifConvert(Func &, const Machine &) { return false; }
+// ---------------------------------------------------------------------------
+// Loop-invariant code motion
+// ---------------------------------------------------------------------------
+
+// A preheader for loop header h whose only outside predecessor is `outside`:
+// that block itself if it falls into h alone, otherwise a new block on the edge.
+static int makePreheader(Func &f, int h, int outside) {
+    int s[2];
+    if (f.succs(outside, s) == 1) return outside;
+    int p = static_cast<int>(f.bb.size());
+    f.bb.emplace_back();
+    BB &P = f.bb[p];
+    Inst j;
+    j.op = OP_JMP;
+    j.tgt[0] = h;
+    P.insts.push_back(j);
+    P.freq = f.bb[outside].freq;
+    P.loopDepth = f.bb[outside].loopDepth;
+    Inst &t = f.bb[outside].term();
+    for (int k = 0; k < 2; k++) if (t.tgt[k] == h) t.tgt[k] = p;
+    for (Phi &ph : f.bb[h].phis)
+        for (auto &in : ph.in) if (in.first == outside) in.first = p;
+    f.rebuildPreds();
+    return p;
+}
+
+bool licm(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    std::vector<int> order(li.loops.size());
+    for (size_t i = 0; i < order.size(); i++) order[i] = static_cast<int>(i);
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return li.loops[a].depth > li.loops[b].depth; });
+    bool changed = false;
+    for (int l : order) {
+        const LoopInfo::Loop &L = li.loops[l];
+        const int h = L.header;
+        if (irr[h]) continue;
+        std::vector<char> in(f.bb.size() + 1, 0);
+        for (int b : L.blocks) in[b] = 1;
+        std::vector<int> outside;
+        for (int p : f.bb[h].preds) if (!in[p]) outside.push_back(p);
+        if (outside.size() != 1) continue;
+        std::vector<DefSite> ds = defSites(f);
+        // Stores in the loop decide which loads may move.
+        std::vector<Opnd> loopStores;
+        for (int b : L.blocks)
+            for (const Inst &x : f.bb[b].insts)
+                if (x.op == OP_STORE) loopStores.push_back(x.a[0]);
+        std::vector<int> defBlock(f.nvals, -1);
+        for (int v = 0; v < f.nvals; v++) defBlock[v] = ds[v].block;
+        auto invariant = [&](Opnd o) {
+            return o.isConst || defBlock[o.v] < 0 || !in[defBlock[o.v]];
+        };
+        auto hoistable = [&](const Inst &x) {
+            if (x.dst < 0) return false;
+            if (isPure(x.op)) return true;
+            if (x.op == OP_DIV || x.op == OP_MOD) return rangeOf(f, ds, x.a[1], 8).lo >= 1;
+            if (x.op == OP_LOAD) {
+                if (rangeOf(f, ds, x.a[0], 8).hi >= kMemWords) return false;   // may trap
+                for (const Opnd &s : loopStores)
+                    if (!mustDiffer(f, ds, s, x.a[0])) return false;
+                return true;
+            }
+            return false;
+        };
+        int pre = -1;
+        bool any = true;
+        while (any) {
+            any = false;
+            for (int b : d.rpo) {
+                if (!in[b]) continue;
+                // f.bb may grow (preheader), so never hold a reference across the loop body.
+                for (size_t i = 0; i + 1 < f.bb[b].insts.size();) {
+                    Inst x = f.bb[b].insts[i];
+                    bool ok = hoistable(x);
+                    for (int a = 0; ok && a < x.n; a++) ok = invariant(x.a[a]);
+                    if (!ok) { i++; continue; }
+                    if (pre < 0) {
+                        pre = makePreheader(f, h, outside[0]);
+                        in.resize(f.bb.size() + 1, 0);
+                    }
+                    BB &P = f.bb[pre];
+                    P.insts.insert(P.insts.end() - 1, x);
+                    f.bb[b].insts.erase(f.bb[b].insts.begin() + i);
+                    defBlock[x.dst] = pre;
+                    any = true;
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            // Loop structure changed (new preheader); recompute for the next loop.
+            f.rebuildPreds();
+            d = computeDominators(f);
+            li = computeLoops(f, d);
+            irr = irreducibleBlocks(f, d);
+            return changed || licm(f);
+        }
+    }
+    return changed;
+}
+
+// ---------------------------------------------------------------------------
+// Machine-specific fusion and strength reduction
+// ---------------------------------------------------------------------------
+
+bool fuseOps(Func &f, const Machine &m) {
+    f.resolveAll();
+    std::vector<int> uses(f.nvals, 0);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+        for (Inst &x : B.insts) for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) uses[x.a[a].v]++;
+    }
+    std::vector<DefSite> ds = defSites(f);
+    const bool macGood = m.fused_mac && m.lat_mac <= m.lat_mul + m.lat_alu;
+    const bool addshGood = m.fused_addsh && m.lat_addsh <= 2 * m.lat_alu;
+    bool changed = false;
+    auto single = [&](Opnd o, Op op) -> const Inst * {
+        const Inst *p = defInst(f, ds, o);
+        return (p && p->op == op && uses[o.v] == 1) ? p : nullptr;
+    };
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Inst &x : B.insts) {
+            if (x.op == OP_ADD) {
+                bool done = false;
+                for (int side = 0; side < 2 && !done && macGood; side++) {
+                    const Inst *p = single(x.a[side], OP_MUL);
+                    if (!p) continue;
+                    Opnd other = x.a[1 - side];
+                    Inst y = x;
+                    y.op = OP_MAC; y.n = 3; y.a[0] = p->a[0]; y.a[1] = p->a[1]; y.a[2] = other;
+                    uses[x.a[side].v]--;
+                    x = y;
+                    done = changed = true;
+                }
+                for (int side = 0; side < 2 && !done && addshGood; side++) {
+                    const Inst *p = single(x.a[side], OP_SHL);
+                    if (!p || !p->a[1].isConst) continue;
+                    Opnd other = x.a[1 - side];
+                    Inst y = x;
+                    y.op = OP_ADDSH; y.n = 2; y.a[0] = other; y.a[1] = p->a[0]; y.k = static_cast<uint8_t>(p->a[1].c & 31);
+                    uses[x.a[side].v]--;
+                    x = y;
+                    done = changed = true;
+                }
+            } else if (x.op == OP_SUB && macGood && x.a[1].isConst) {
+                const Inst *p = single(x.a[0], OP_MUL);
+                if (p) {
+                    Inst y = x;
+                    y.op = OP_MAC; y.n = 3; y.a[0] = p->a[0]; y.a[1] = p->a[1]; y.a[2] = Opnd::cst(0u - x.a[1].c);
+                    uses[x.a[0].v]--;
+                    x = y;
+                    changed = true;
+                }
+            } else if (x.op == OP_MUL && x.a[1].isConst && m.fused_addsh && m.lat_addsh < m.lat_mul) {
+                // y * (2^k + 1) == y + (y << k)
+                uint32_t c = x.a[1].c;
+                for (int k = 1; k < 31; k++) {
+                    if (c == (1u << k) + 1u) {
+                        x.op = OP_ADDSH; x.n = 2; x.a[1] = x.a[0]; x.k = static_cast<uint8_t>(k);
+                        changed = true;
+                        break;
+                    }
+                }
+            } else if (x.op == OP_SHL && x.a[1].isConst && m.lat_mul < m.lat_alu) {
+                x.op = OP_MUL;
+                x.a[1] = Opnd::cst(1u << (x.a[1].c & 31));
+                changed = true;
+            }
+        }
+    }
+    return changed;
+}
+
+// ---------------------------------------------------------------------------
+// If-conversion: small branch arms become straight-line code plus select.
+// ---------------------------------------------------------------------------
+
+bool ifConvert(Func &f, const Machine &m) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    const int budget = 2 * (m.taken_branch_penalty + 1);
+    bool changed = false;
+    auto speculatable = [&](const Inst &x) {
+        if (isPure(x.op)) return true;
+        if (x.op == OP_DIV || x.op == OP_MOD) return rangeOf(f, ds, x.a[1], 8).lo >= 1;
+        if (x.op == OP_LOAD) return rangeOf(f, ds, x.a[0], 8).hi < kMemWords;
+        return false;
+    };
+    // Arm S of block a: only reached from a, falls into one block, all work speculatable.
+    auto simpleArm = [&](int a, int s, int &join) {
+        const BB &S = f.bb[s];
+        if (s == a || s == 0 || !S.alive || S.preds.size() != 1 || S.preds[0] != a || !S.phis.empty()) return false;
+        if (S.term().op != OP_JMP) return false;
+        for (size_t i = 0; i + 1 < S.insts.size(); i++) if (!speculatable(S.insts[i])) return false;
+        join = S.term().tgt[0];
+        return join != s && join != a;
+    };
+    for (int a = 0; a < static_cast<int>(f.bb.size()); a++) {
+        if (!f.bb[a].alive || f.bb[a].term().op != OP_BR) continue;
+        const Opnd c = f.resolve(f.bb[a].term().a[0]);
+        const int t = f.bb[a].term().tgt[0], e = f.bb[a].term().tgt[1];
+        int jt = -1, je = -1;
+        bool armT = simpleArm(a, t, jt), armE = simpleArm(a, e, je);
+        int join;
+        std::vector<int> arms;
+        if (armT && armE && jt == je) { join = jt; arms = {t, e}; }
+        else if (armT && jt == e) { join = e; arms = {t}; }
+        else if (armE && je == t) { join = t; arms = {e}; }
+        else continue;
+        int cost = 0;
+        for (int s : arms) cost += static_cast<int>(f.bb[s].insts.size()) - 1;
+        cost += static_cast<int>(f.bb[join].phis.size());
+        if (cost > budget) continue;
+        // Value flowing into the join along the "true" and "false" directions.
+        auto incoming = [&](const Phi &ph, int from) {
+            for (auto &in : ph.in) if (in.first == from) return f.resolve(in.second);
+            return Opnd::cst(0);
+        };
+        BB &A = f.bb[a];
+        Inst br = A.term();
+        A.insts.pop_back();
+        for (int s : arms)
+            for (size_t i = 0; i + 1 < f.bb[s].insts.size(); i++) A.insts.push_back(f.bb[s].insts[i]);
+        const int fromTrue = (arms.size() == 2 || arms[0] == t) ? t : a;
+        const int fromFalse = (arms.size() == 2 || arms[0] == e) ? e : a;
+        for (Phi &ph : f.bb[join].phis) {
+            Opnd vt = incoming(ph, fromTrue), vf = incoming(ph, fromFalse);
+            Opnd v = vt;
+            if (vt != vf) {
+                Inst sel;
+                sel.op = OP_SELECT;
+                sel.dst = f.newVal();
+                sel.n = 3;
+                sel.a[0] = c; sel.a[1] = vt; sel.a[2] = vf;
+                A.insts.push_back(sel);
+                v = Opnd::val(sel.dst);
+            }
+            std::vector<std::pair<int, Opnd>> keep;
+            for (auto &in : ph.in)
+                if (in.first != t && in.first != e && in.first != a) keep.push_back(in);
+            keep.push_back({a, v});
+            ph.in.swap(keep);
+        }
+        Inst j;
+        j.op = OP_JMP;
+        j.tgt[0] = join;
+        A.insts.push_back(j);
+        (void)br;
+        for (int s : arms) f.bb[s].alive = false;
+        f.rebuildPreds();
+        ds = defSites(f);
+        changed = true;
+    }
+    return changed;
+}
 
 }  // namespace kopt
