@@ -1,0 +1,31 @@
+; a cycle a -> b -> c -> a entered at a, b or c; trip count depends on input
+func irreducible_three_entries(v0, v1)
+entry:
+  and v2, v0, 3
+  and v3, v1, 31
+  const v4, 7
+  eq v5, v2, 0
+  br v5, a, e1
+e1:
+  eq v6, v2, 1
+  br v6, b, c
+a:
+  mul v4, v4, 3
+  add v3, v3, -1
+  lt v7, 0, v3
+  br v7, b, done
+b:
+  xor v4, v4, v3
+  store v3, v4
+  add v3, v3, -1
+  lt v7, 0, v3
+  br v7, c, done
+c:
+  shl v8, v4, 1
+  add v4, v8, v3
+  add v3, v3, -2
+  lt v7, 0, v3
+  br v7, a, done
+done:
+  vstore 9, v4
+  ret v3

@@ -45,6 +45,9 @@ bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs);
 // n - i > (factor-1)*s (signed; a wrapped difference just picks the original
 // loop). The original loop stays as the remainder. New registers get names
 // appended to regNames.
+// Give every extra entry of an irreducible region its own copy of the region.
+bool splitIrreducible(Func &f, int sizeBudget);
+
 // Unswitch loops on branches whose condition the loop never writes.
 bool unswitchLoops(Func &f, int sizeBudget);
 

@@ -327,6 +327,106 @@ bool peelLoops(Func &f, int count, int sizeBudget) {
     return changed;
 }
 
+// Irreducible regions: a cycle that can be entered at more than one block.
+// For each strongly connected region with several entry blocks, every entry
+// but the first gets its own copy of the whole region, and the outside edges
+// into that entry go to the copy. Each copy then has one entry (a natural
+// loop that the loop passes understand). Copying blocks and redirecting edges
+// in register form keeps every execution's instruction sequence unchanged.
+bool splitIrreducible(Func &f, int sizeBudget) {
+    const int n = static_cast<int>(f.bb.size());
+    // Tarjan's SCC, iterative.
+    std::vector<int> idx(n, -1), low(n, 0), comp(n, -1), st;
+    std::vector<char> on(n, 0);
+    int counter = 0, ncomp = 0;
+    for (int r = 0; r < n; r++) {
+        if (!f.bb[r].alive || idx[r] >= 0) continue;
+        std::vector<std::pair<int, int>> call{{r, 0}};
+        idx[r] = low[r] = counter++;
+        st.push_back(r); on[r] = 1;
+        while (!call.empty()) {
+            int v = call.back().first;
+            int &k = call.back().second;
+            int out[2];
+            int ns = f.succs(v, out);
+            if (k < ns) {
+                int w = out[k++];
+                if (w < 0 || w >= n || !f.bb[w].alive) continue;
+                if (idx[w] < 0) {
+                    idx[w] = low[w] = counter++;
+                    st.push_back(w); on[w] = 1;
+                    call.push_back({w, 0});
+                } else if (on[w]) {
+                    low[v] = std::min(low[v], idx[w]);
+                }
+                continue;
+            }
+            if (low[v] == idx[v]) {
+                while (true) {
+                    int w = st.back(); st.pop_back(); on[w] = 0;
+                    comp[w] = ncomp;
+                    if (w == v) break;
+                }
+                ncomp++;
+            }
+            call.pop_back();
+            if (!call.empty()) { int u = call.back().first; low[u] = std::min(low[u], low[v]); }
+        }
+    }
+    std::vector<std::vector<int>> members(ncomp);
+    for (int b = 0; b < n; b++) if (comp[b] >= 0) members[comp[b]].push_back(b);
+    // Entry blocks: members with a predecessor outside the region.
+    std::vector<std::vector<int>> entries(ncomp);
+    for (int b = 0; b < n; b++) {
+        if (comp[b] < 0) continue;
+        int out[2];
+        int ns = f.succs(b, out);
+        for (int k = 0; k < ns; k++) {
+            int w = out[k];
+            if (w < 0 || w >= n || comp[w] < 0 || comp[w] == comp[b]) continue;
+            auto &e = entries[comp[w]];
+            if (std::find(e.begin(), e.end(), w) == e.end()) e.push_back(w);
+        }
+    }
+    bool changed = false;
+    for (int c = 0; c < ncomp; c++) {
+        if (members[c].size() < 2 || entries[c].size() < 2 || comp[0] == c) continue;
+        std::sort(entries[c].begin(), entries[c].end());
+        int size = 0;
+        for (int b : members[c]) size += static_cast<int>(f.bb[b].insts.size());
+        if (size * static_cast<int>(entries[c].size() - 1) > sizeBudget) continue;
+        for (size_t e = 1; e < entries[c].size(); e++) {
+            const int entry = entries[c][e];
+            const int base = static_cast<int>(f.bb.size());
+            std::unordered_map<int, int> clone;
+            for (size_t i = 0; i < members[c].size(); i++) clone[members[c][i]] = base + static_cast<int>(i);
+            for (int b : members[c]) {
+                BB copy = f.bb[b];
+                copy.label.clear();
+                f.bb.push_back(copy);
+            }
+            for (int b : members[c]) {
+                Inst &t = f.bb[clone[b]].term();
+                int nt = (t.op == OP_JMP) ? 1 : (t.op == OP_BR ? 2 : 0);
+                for (int k = 0; k < nt; k++) {
+                    auto it = clone.find(t.tgt[k]);
+                    if (it != clone.end()) t.tgt[k] = it->second;
+                }
+            }
+            for (int b = 0; b < n; b++) {
+                if (comp[b] == c || !f.bb[b].alive) continue;
+                Inst &t = f.bb[b].term();
+                int nt = (t.op == OP_JMP) ? 1 : (t.op == OP_BR ? 2 : 0);
+                for (int k = 0; k < nt; k++)
+                    if (t.tgt[k] == entry) t.tgt[k] = clone[entry];
+            }
+            changed = true;
+        }
+    }
+    if (changed) f.rebuildPreds();
+    return changed;
+}
+
 // Loop unswitching: a branch inside a loop on a register the loop never
 // writes takes the same side in every round. Copy the loop, test the register
 // once before it, and turn the branch into a jump in each copy. Then each copy

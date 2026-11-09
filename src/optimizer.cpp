@@ -607,7 +607,8 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             for (int step = 0; step < 4; step++) {
                 std::vector<uint32_t> names;
                 Func rf = toRegisterForm(cur, names);
-                if (!peelLoops(rf, 16, budget)) break;
+                const bool split = splitIrreducible(rf, budget);
+            if (!peelLoops(rf, 16, budget) && !split) break;
                 threadJumps(rf, 12, 256);
                 Program transformed = fromRegisterForm(rf, names);
                 if (transformed.instrCount() > 2500 || work + transformed.instrCount() > workCap) break;
