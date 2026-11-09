@@ -551,7 +551,6 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     int effort = dense ? 0 : (progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0));
     if (trainingWork > 1000000) effort = 0;
     else if (trainingWork > 300000) effort = std::min(effort, 1);
-    const bool small = effort >= 1;
     std::vector<Cand> cands;
     // Phase 1: the SSA pipeline, in a few flavours.
     {
@@ -570,7 +569,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fl.speculate = kVariants[v][2];
             fl.strength = kVariants[v][3];
             fl.tabulate = v == 8;
-            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1, effort == 0);
+            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), true, p1, effort == 0);
         }
         for (Cand &c : p1) quick(c);
         for (Cand &c : p1) cands.push_back(c);
