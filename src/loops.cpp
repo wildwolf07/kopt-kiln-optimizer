@@ -208,6 +208,90 @@ bool peelLoops(Func &f, int count, int sizeBudget) {
     return changed;
 }
 
+// Loop unswitching: a branch inside a loop on a register the loop never
+// writes takes the same side in every round. Copy the loop, test the register
+// once before it, and turn the branch into a jump in each copy. Then each copy
+// is simpler (in one, a guarded division can leave the loop; in both, the
+// branch and its taken-jump cost disappear).
+bool unswitchLoops(Func &f, int sizeBudget) {
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    std::vector<char> done(f.bb.size(), 0);   // blocks already copied in this call
+    bool changed = false;
+    // Innermost loops first (deepest), one unswitch per loop.
+    std::vector<int> order(li.loops.size());
+    for (size_t i = 0; i < order.size(); i++) order[i] = static_cast<int>(i);
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return li.loops[a].depth > li.loops[b].depth; });
+    for (int l : order) {
+        const LoopInfo::Loop L = li.loops[l];
+        const int h = L.header;
+        if (irr[h] || h == 0) continue;
+        bool touched = false;
+        for (int b : L.blocks) if (done[b]) touched = true;
+        if (touched) continue;
+        const int n0 = static_cast<int>(f.bb.size());
+        std::vector<char> in(n0, 0);
+        int size = 0;
+        for (int b : L.blocks) { in[b] = 1; size += static_cast<int>(f.bb[b].insts.size()); }
+        if (size * 2 > sizeBudget) continue;
+        int cb = -1;
+        for (int b : L.blocks) {
+            const Inst &t = f.bb[b].term();
+            if (t.op != OP_BR || t.a[0].isConst || t.tgt[0] == t.tgt[1]) continue;
+            const int r = t.a[0].v;
+            bool written = false;
+            for (int c : L.blocks)
+                for (const Inst &x : f.bb[c].insts) if (x.dst == r) written = true;
+            if (!written) { cb = b; break; }
+        }
+        if (cb < 0) continue;
+        const Opnd cond = f.bb[cb].term().a[0];
+        std::unordered_map<int, int> clone;
+        for (int b : L.blocks) {
+            clone[b] = static_cast<int>(f.bb.size());
+            BB copy = f.bb[b];
+            copy.label.clear();
+            f.bb.push_back(copy);
+        }
+        for (int b : L.blocks) {
+            Inst &t = f.bb[clone[b]].term();
+            int nt = (t.op == OP_JMP) ? 1 : (t.op == OP_BR ? 2 : 0);
+            for (int s2 = 0; s2 < nt; s2++)
+                if (t.tgt[s2] < n0 && in[t.tgt[s2]]) t.tgt[s2] = clone[t.tgt[s2]];
+        }
+        // Original: the condition is true. Copy: it is false.
+        {
+            Inst &t = f.bb[cb].term();
+            int tg = t.tgt[0];
+            t.op = OP_JMP; t.n = 0; t.tgt[0] = tg; t.tgt[1] = -1;
+            Inst &u = f.bb[clone[cb]].term();
+            int fg = u.tgt[1];
+            u.op = OP_JMP; u.n = 0; u.tgt[0] = fg; u.tgt[1] = -1;
+        }
+        const int U = static_cast<int>(f.bb.size());
+        {
+            BB ub;
+            Inst br;
+            br.op = OP_BR; br.n = 1; br.a[0] = cond; br.tgt[0] = h; br.tgt[1] = clone[h];
+            ub.insts.push_back(br);
+            f.bb.push_back(ub);
+        }
+        for (int b = 0; b < n0; b++) {
+            if (in[b] || !f.bb[b].alive) continue;
+            Inst &t = f.bb[b].term();
+            int nt = (t.op == OP_JMP) ? 1 : (t.op == OP_BR ? 2 : 0);
+            for (int s2 = 0; s2 < nt; s2++) if (t.tgt[s2] == h) t.tgt[s2] = U;
+        }
+        for (int b : L.blocks) done[b] = 1;
+        done.resize(f.bb.size(), 1);
+        changed = true;
+    }
+    if (changed) f.rebuildPreds();
+    return changed;
+}
+
 namespace {
 
 // Does `b` write register r?

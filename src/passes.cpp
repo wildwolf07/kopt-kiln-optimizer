@@ -847,8 +847,9 @@ bool combineLinear(Func &f) {
     }
     auto isLin = [](const Inst *x) {
         if (!x) return false;
-        if (x->op == OP_ADD || x->op == OP_SUB) return true;
+        if (x->op == OP_ADD || x->op == OP_SUB || x->op == OP_ADDSH) return true;   // addsh: a + (b << k)
         if ((x->op == OP_MUL || x->op == OP_SHL) && x->a[1].isConst) return true;
+        if (x->op == OP_MAC && x->a[1].isConst) return true;   // mac a, k, c = a*k + c
         return false;
     };
     bool changed = false;
@@ -858,7 +859,7 @@ bool combineLinear(Func &f) {
         const size_t nins = f.bb[b].insts.size();
         for (size_t i = 0; i < nins; i++) {
             const Inst root = f.bb[b].insts[i];
-            if (root.op != OP_ADD && root.op != OP_SUB) continue;
+            if (root.op != OP_ADD && root.op != OP_SUB && root.op != OP_ADDSH) continue;
             // Gather terms: (coefficient, operand).
             std::vector<std::pair<uint32_t, Opnd>> terms;
             uint32_t konst = 0;
@@ -866,7 +867,8 @@ bool combineLinear(Func &f) {
             struct Item { Opnd o; uint32_t k; bool top; };
             std::vector<Item> work;
             work.push_back({root.a[0], 1u, true});
-            work.push_back({root.a[1], root.op == OP_SUB ? 0xFFFFFFFFu : 1u, true});
+            work.push_back({root.a[1], root.op == OP_SUB ? 0xFFFFFFFFu
+                                       : root.op == OP_ADDSH ? (1u << (root.k & 31)) : 1u, true});
             while (!work.empty()) {
                 Item it = work.back();
                 work.pop_back();
@@ -876,6 +878,8 @@ bool combineLinear(Func &f) {
                     inner++;
                     if (d->op == OP_ADD) { work.push_back({d->a[0], it.k, false}); work.push_back({d->a[1], it.k, false}); }
                     else if (d->op == OP_SUB) { work.push_back({d->a[0], it.k, false}); work.push_back({d->a[1], 0u - it.k, false}); }
+                    else if (d->op == OP_MAC) { work.push_back({d->a[0], it.k * d->a[1].c, false}); work.push_back({d->a[2], it.k, false}); }
+                    else if (d->op == OP_ADDSH) { work.push_back({d->a[0], it.k, false}); work.push_back({d->a[1], it.k * (1u << (d->k & 31)), false}); }
                     else if (d->op == OP_MUL) work.push_back({d->a[0], it.k * d->a[1].c, false});
                     else work.push_back({d->a[0], it.k * (1u << (d->a[1].c & 31)), false});
                     continue;
@@ -916,7 +920,7 @@ bool combineLinear(Func &f) {
             else if (konst != 0) acc = emit(OP_ADD, acc, Opnd::cst(konst));
             // The root becomes a copy of the new sum.
             Inst &r = f.bb[b].insts[i];
-            r.op = OP_ADD; r.n = 2; r.a[0] = acc; r.a[1] = Opnd::cst(0);
+            r.op = OP_ADD; r.n = 2; r.k = 0; r.a[0] = acc; r.a[1] = Opnd::cst(0);
             if (!pre.empty()) inserts.push_back({i, pre});
             changed = true;
         }
@@ -1509,8 +1513,11 @@ bool instSimplify(Func &f) {
         f.resolveAll();
         std::vector<DefSite> ds = defSites(f);
         DomInfo d = computeDominators(f);
+        f.rebuildPreds();
         for (int b : d.rpo) {
             BB &B = f.bb[b];
+            std::vector<Fact> blockFacts;
+            bool factsReady = false;
             // Trivial phis: every input (ignoring self references) is the same.
             for (size_t k = 0; k < B.phis.size();) {
                 Phi &p = B.phis[k];
@@ -1533,9 +1540,35 @@ bool instSimplify(Func &f) {
             for (Inst &x : B.insts) {
                 if (x.op == OP_BR || x.op == OP_RET || x.op == OP_TRAP || x.op == OP_STORE || x.op == OP_VSTORE) {
                     for (int a = 0; a < x.n; a++) x.a[a] = f.resolve(x.a[a]);
+                    // br (x == 0), A, B  ->  br x, B, A  (br tests "not zero")
+                    if (x.op == OP_BR && !x.a[0].isConst) {
+                        const Inst *c = defInst(f, ds, x.a[0]);
+                        if (c && c->op == OP_EQ && c->a[1].isC(0) && !c->a[0].isConst) {
+                            x.a[0] = f.resolve(c->a[0]);
+                            std::swap(x.tgt[0], x.tgt[1]);
+                            again = true;
+                        } else if (c && c->op == OP_EQ && c->a[0].isC(0) && !c->a[1].isConst) {
+                            x.a[0] = f.resolve(c->a[1]);
+                            std::swap(x.tgt[0], x.tgt[1]);
+                            again = true;
+                        }
+                    }
                     continue;
                 }
                 if (x.dst < 0 || f.fwd[x.dst] != Opnd::val(x.dst)) continue;
+                // select on a condition that a dominating branch already decided.
+                if (x.op == OP_SELECT && !f.resolve(x.a[0]).isConst) {
+                    const Opnd c = f.resolve(x.a[0]);
+                    if (!factsReady) { blockFacts = chainFacts(f, ds, b, &d.idom); factsReady = true; }
+                    int known = -1;
+                    for (const Fact &fa : blockFacts)
+                        if (fa.v == c.v && fa.other.isC(0) && (fa.rel == 4 || fa.rel == 5)) known = fa.rel == 5 ? 1 : 0;
+                    if (known >= 0) {
+                        f.replaceAll(x.dst, f.resolve(x.a[known ? 1 : 2]));
+                        again = true;
+                        continue;
+                    }
+                }
                 if (x.op == OP_LOAD || x.op == OP_VLOAD) {
                     for (int a = 0; a < x.n; a++) x.a[a] = f.resolve(x.a[a]);
                     continue;
@@ -1850,6 +1883,22 @@ static int makePreheader(Func &f, int h, int outside) {
     return p;
 }
 
+// Is operand o provably non-zero on the edge from -> to? (Facts of the
+// branches that dominate `from`, plus the edge's own branch.)
+static bool nonZeroOnEdge(const Func &f, const std::vector<DefSite> &ds, Opnd o, int from, int to,
+                          const std::vector<int> &idom) {
+    if (o.isConst) return o.c != 0;
+    std::vector<Fact> facts = chainFacts(f, ds, from, &idom);
+    const Inst &t = f.bb[from].term();
+    if (t.op == OP_BR && t.tgt[0] != t.tgt[1] && (t.tgt[0] == to || t.tgt[1] == to))
+        factsFromCond(f, ds, t.a[0], t.tgt[0] == to, facts, 0);
+    for (const Fact &fa : facts)
+        if (fa.v == o.v && fa.rel == 5 && fa.other.isConst && fa.other.c == 0) return true;
+    auto other = [&](Opnd x) -> SR { return x.isConst ? sOfConst(x.c) : fromRange(rangeOf(f, ds, x, 6)); };
+    SR r = refine(fromRange(rangeOf(f, ds, o, 8)), o.v, facts, other);
+    return !r.empty() && (r.lo > 0 || r.hi < 0);
+}
+
 bool licm(Func &f) {
     f.resolveAll();
     f.rebuildPreds();
@@ -1885,7 +1934,8 @@ bool licm(Func &f) {
         auto hoistable = [&](const Inst &x) {
             if (x.dst < 0) return false;
             if (isPure(x.op)) return true;
-            if (x.op == OP_DIV || x.op == OP_MOD) return rangeOf(f, ds, x.a[1], 8).lo >= 1;
+            if (x.op == OP_DIV || x.op == OP_MOD)
+                return rangeOf(f, ds, x.a[1], 8).lo >= 1 || nonZeroOnEdge(f, ds, x.a[1], outside[0], h, d.idom);
             if (x.op == OP_LOAD) {
                 if (rangeOf(f, ds, x.a[0], 8).hi >= kMemWords) return false;   // may trap
                 for (const Opnd &st : loopStores)

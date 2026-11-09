@@ -131,6 +131,14 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         TIMED("fuseOps", fuseOps(f, m, fl.fuseReductions));
         TIMED("ifConvert", ifConvert(f, m));
         TIMED("instSimplify", instSimplify(f));
+        // If-conversion and select folding can leave sums that now merge.
+        if (TIMED("combineLinear", combineLinear(f))) {
+            instSimplify(f);
+            gvn(f);
+            dce(f);
+            TIMED("fuseOps", fuseOps(f, m, fl.fuseReductions));
+            instSimplify(f);
+        }
         TIMED("dce", dce(f));
         TIMED("simplifyCFG", simplifyCFG(f));
     }
@@ -313,12 +321,14 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         const int budget = std::max(24, m.icache_size);
         // Register-form transforms: rotate+unroll by 1/2/4/8, jump threading,
         // and full peeling of short loops (constant trip counts fold away).
-        struct Plan { const char *name; int unroll; int peel; bool thread; int counted; };
+        struct Plan { const char *name; int unroll; int peel; bool thread; int counted; bool unswitch = false; };
         static const Plan plans[] = {
             {"unroll1", 1, 0, false, 0}, {"unroll2", 2, 0, false, 0}, {"unroll4", 4, 0, false, 0},
             {"unroll8", 8, 0, false, 0}, {"thread", 0, 0, true, 0}, {"peel8", 0, 8, true, 0},
             {"peel16", 0, 16, true, 0}, {"cunroll2", 1, 0, false, 2}, {"cunroll4", 1, 0, false, 4},
             {"cunroll8", 1, 0, false, 8}, {"cunroll4r", 1, 0, false, -4}, {"cunroll8r", 1, 0, false, -8},
+            {"unswitch", 0, 0, false, 0, true}, {"unswitch+peel16", 0, 16, true, 0, true},
+            {"unswitch+unroll4", 4, 0, false, 0, true},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
@@ -326,6 +336,10 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 std::vector<uint32_t> names;
                 Func rf = toRegisterForm(basePrograms[bi], names);
                 bool any = false;
+                if (pl.unswitch) {
+                    if (!unswitchLoops(rf, 2 * budget)) continue;
+                    any = true;
+                }
                 if (pl.peel) any |= peelLoops(rf, pl.peel, 2 * std::max(64, m.icache_size));
                 if (pl.thread) any |= threadJumps(rf, 12, 256);
                 if (pl.unroll) {
@@ -353,17 +367,36 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             std::vector<const Cand *> top;
             for (const Cand &c : cands) if (c.ok) top.push_back(&c);
             std::stable_sort(top.begin(), top.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
-            if (top.size() > 3) top.resize(3);
+            // Distinct programs only (backend variants of one program count once).
+            std::vector<const Cand *> distinct;
+            std::vector<std::string> seenText;
+            for (const Cand *c : top) {
+                if (distinct.size() >= 5) break;
+                std::string t = printProgram(c->p);
+                bool dup = false;
+                for (const std::string &x : seenText) if (x == t) dup = true;
+                if (dup) continue;
+                seenText.push_back(t);
+                distinct.push_back(c);
+            }
             std::vector<std::pair<Program, std::pair<std::string, Flags>>> work;
-            for (const Cand *c : top) work.push_back({c->p, {c->what, c->flags}});
+            for (const Cand *c : distinct) work.push_back({c->p, {c->what, c->flags}});
             std::vector<Cand> p3;
             for (auto &w : work) {
                 if (w.second.first.size() > 120) continue;
-                std::vector<uint32_t> names;
-                Func rf = toRegisterForm(w.first, names);
-                if (!threadJumps(rf, 16, 512)) continue;
-                Program transformed = fromRegisterForm(rf, names);
-                compileVariants(transformed, m, opt.maxLevel, w.second.second, w.second.first + "/thread", true, p3);
+                // Threading, and peeling (a transform in phase 2 can leave a loop
+                // that only the recompile made short enough to peel away).
+                for (int kind = 0; kind < 2; kind++) {
+                    std::vector<uint32_t> names;
+                    Func rf = toRegisterForm(w.first, names);
+                    bool any = kind == 0 ? threadJumps(rf, 16, 512)
+                                         : (round == 0 && peelLoops(rf, 16, 2 * std::max(64, m.icache_size)) &&
+                                            (threadJumps(rf, 12, 256), true));
+                    if (!any) continue;
+                    Program transformed = fromRegisterForm(rf, names);
+                    compileVariants(transformed, m, opt.maxLevel, w.second.second,
+                                    w.second.first + (kind == 0 ? "/thread" : "/peel16"), true, p3);
+                }
             }
             if (p3.empty()) break;
             for (Cand &c : p3) quick(c);
