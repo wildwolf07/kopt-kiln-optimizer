@@ -53,6 +53,7 @@ bool dce(Func &f);                 // remove values nobody needs (never removes 
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader
 bool reassociate(Func &f);         // shorten loop-carried add chains
+bool balanceSums(Func &f);          // straight-line add chains -> balanced trees
 bool hornerSplit(Func &f, int registers);        // h*x+c chains -> k interleaved chains in x^k
 bool speculate(Func &f, int budgetPerEdge, bool maskLoads = false);   // hoist pure work above branches
 bool fuseOps(Func &f, const Machine &m, bool fuseReductions = false);   // mac / addsh for this machine

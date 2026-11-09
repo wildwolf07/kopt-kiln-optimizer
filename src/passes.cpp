@@ -2923,6 +2923,92 @@ bool selectToAdd(Func &f) {
     return changed;
 }
 
+// Tree-height reduction for sums outside loop recurrences: a chain of
+// single-use adds with 4 or more terms becomes a balanced tree (32-bit
+// addition wraps, so it is associative and commutative). Products feeding
+// the tree become pairs of mul/mac later, two short chains instead of one
+// long one.
+bool balanceSums(Func &f) {
+    f.resolveAll();
+    std::vector<int> rec = recurrenceIds(f);
+    std::vector<DefSite> ds = defSites(f);
+    std::vector<int> uses(f.nvals, 0);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+        for (Inst &x : B.insts) for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) uses[x.a[a].v]++;
+    }
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        if (!f.bb[b].alive) continue;
+        std::vector<char> inner(f.nvals, 0);
+        // Roots: adds not used by another single-use add of this block.
+        std::vector<std::pair<size_t, std::vector<Inst>>> inserts;
+        for (size_t i = f.bb[b].insts.size(); i-- > 0;) {
+            const Inst root = f.bb[b].insts[i];
+            if (root.op != OP_ADD || root.dst < 0 || inner[root.dst]) continue;
+            if (root.dst < static_cast<int>(rec.size()) && rec[root.dst] >= 0) continue;
+            std::vector<Opnd> leaves;
+            std::vector<Opnd> work{root.a[1], root.a[0]};
+            std::vector<int> innerVals;
+            while (!work.empty()) {
+                Opnd o = work.back();
+                work.pop_back();
+                const Inst *d = o.isConst ? nullptr : defInst(f, ds, o);
+                if (d && d->op == OP_ADD && uses[o.v] == 1 && ds[o.v].block == b &&
+                    !(o.v < static_cast<int>(rec.size()) && rec[o.v] >= 0) && innerVals.size() < 15) {
+                    innerVals.push_back(o.v);
+                    work.push_back(d->a[1]);
+                    work.push_back(d->a[0]);
+                } else {
+                    leaves.push_back(o);
+                }
+            }
+            for (int v : innerVals) inner[v] = 1;
+            if (leaves.size() < 4) continue;
+            // Already balanced enough? A chain of k adds has depth k; the tree
+            // has depth ceil(log2(leaves)). Only rewrite when that saves 2+.
+            int treeDepth = 0;
+            for (size_t n = 1; n < leaves.size(); n *= 2) treeDepth++;
+            int chainDepth = 0;
+            {
+                // depth of the existing expression
+                std::function<int(Opnd)> dep = [&](Opnd o) -> int {
+                    const Inst *d = o.isConst ? nullptr : defInst(f, ds, o);
+                    if (!d || d->op != OP_ADD || std::find(innerVals.begin(), innerVals.end(), o.v) == innerVals.end()) return 0;
+                    return 1 + std::max(dep(d->a[0]), dep(d->a[1]));
+                };
+                chainDepth = 1 + std::max(dep(root.a[0]), dep(root.a[1]));
+            }
+            if (chainDepth - treeDepth < 2) continue;
+            std::vector<Inst> pre;
+            std::vector<Opnd> level = leaves;
+            while (level.size() > 2) {
+                std::vector<Opnd> next;
+                for (size_t k = 0; k + 1 < level.size(); k += 2) {
+                    Inst a; a.op = OP_ADD; a.dst = f.newVal(); a.n = 2; a.a[0] = level[k]; a.a[1] = level[k + 1];
+                    pre.push_back(a);
+                    next.push_back(Opnd::val(a.dst));
+                }
+                if (level.size() % 2) next.push_back(level.back());
+                level.swap(next);
+            }
+            Inst &r = f.bb[b].insts[i];
+            r.a[0] = level[0];
+            r.a[1] = level[1];
+            if (!pre.empty()) inserts.push_back({i, pre});
+            changed = true;
+        }
+        // inserts were collected back to front: apply in that order.
+        for (auto &ins : inserts) {
+            auto &v = f.bb[b].insts;
+            v.insert(v.begin() + static_cast<long>(ins.first), ins.second.begin(), ins.second.end());
+        }
+        if (!inserts.empty()) { ds = defSites(f); uses.resize(f.nvals, 0); rec.resize(f.nvals, -1); }
+    }
+    return changed;
+}
+
 // ---------------------------------------------------------------------------
 // Machine-specific fusion and strength reduction
 // ---------------------------------------------------------------------------

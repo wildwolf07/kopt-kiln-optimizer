@@ -142,6 +142,10 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             licm(f);
             dce(f);
         }
+        if (fl.reassoc && fl.storeSel && passEnabled("balance") && TIMED("balance", balanceSums(f))) {
+            instSimplify(f);
+            dce(f);
+        }
         if (fl.reassoc && TIMED("horner", hornerSplit(f, m.registers))) {
             instSimplify(f);
             dce(f);
@@ -519,14 +523,11 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // Phase 1: the SSA pipeline, in a few flavours.
     {
         std::vector<Cand> p1;
-        // reassoc, fuseReductions, speculate
         // reassoc, fuseReductions, speculate, strength
-        // reassoc, fuseReductions, speculate, strength, loadPhis
-        static const bool kVariants[][5] = {
-            {true, false, false, true, false}, {false, false, false, true, false}, {false, true, false, true, false},
-            {true, true, false, true, false}, {true, false, true, true, false}, {false, true, true, true, false},
-            {true, false, false, false, false}, {false, true, false, false, false},
-            {true, false, false, true, true}, {true, false, true, true, true},
+        static const bool kVariants[][4] = {
+            {true, false, false, true}, {false, false, false, true}, {false, true, false, true},
+            {true, true, false, true}, {true, false, true, true}, {false, true, true, true},
+            {true, false, false, false}, {false, true, false, false},
         };
         const int nVariants = effort == 2 ? 8 : (effort == 1 ? 2 : 1);
         for (int v = 0; v < nVariants; v++) {
@@ -535,7 +536,6 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fl.fuseReductions = kVariants[v][1];
             fl.speculate = kVariants[v][2];
             fl.strength = kVariants[v][3];
-            fl.loadPhis = kVariants[v][4];
             compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1, effort == 0);
         }
         for (Cand &c : p1) quick(c);
