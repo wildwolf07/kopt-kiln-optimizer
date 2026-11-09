@@ -18,7 +18,7 @@ Cycles summed over the 100 kit sample inputs per machine, using the official
 interpreter/timing model. These are aggregate ratios, not geometric means or
 hidden-test predictions. The `optimizer-integrated` candidate combines the
 core at `64574bd`, memory-fact scheduling from `e818222`, and additional tested
-allocation, counted-loop, layout and correctness changes. The `opt-claude3`
+allocation, counted-loop, layout and correctness changes. The `optimizer-best`
 branch adds loop-nest flattening, irreducible-cycle splitting, min/max and
 Horner regrouping, counting selects, load phis, store selects and
 return-block copying.
