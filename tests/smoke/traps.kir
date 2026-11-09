@@ -1,0 +1,6 @@
+func traps(v0)
+entry:
+  store 12, 99
+  div v1, 1, v0
+  load v2, 4096
+  ret v1

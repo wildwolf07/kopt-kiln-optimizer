@@ -1,0 +1,7 @@
+func fused(v0, v1)
+entry:
+  mul v2, v0, v1
+  add v3, v2, 3
+  shl v4, v1, 2
+  add v5, v3, v4
+  ret v5

@@ -1,0 +1,11 @@
+func guard(v0)
+entry:
+  eq v1, v0, 0
+  br v1, zero, divide
+zero:
+  ret 77
+divide:
+  div v2, -2147483648, v0
+  mod v3, -2147483648, v0
+  add v4, v2, v3
+  ret v4

@@ -1,0 +1,8 @@
+func volatile(v0)
+entry:
+  vstore 5, v0
+  vload v1, 5
+  vload v2, 5
+  add v3, v1, v2
+  vstore 6, v3
+  ret v3

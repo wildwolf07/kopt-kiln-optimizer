@@ -1,0 +1,8 @@
+func scratch(v0)
+entry:
+  store 4095, v0
+  store 3072, 7
+  load v1, 4095
+  load v2, 3072
+  add v3, v1, v2
+  ret v3

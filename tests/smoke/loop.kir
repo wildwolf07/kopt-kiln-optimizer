@@ -1,0 +1,15 @@
+func loop(v0)
+entry:
+  and v0, v0, 15
+  const v1, 0
+  const v2, 0
+  jmp check
+check:
+  lt v3, v1, v0
+  br v3, body, done
+body:
+  add v2, v2, v1
+  add v1, v1, 1
+  jmp check
+done:
+  ret v2
