@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -651,6 +652,17 @@ void computeVRP(Func &f) {
     const int nb = static_cast<int>(f.bb.size());
     std::vector<std::vector<Fact>> facts(nb);
     for (int b : d.rpo) facts[b] = chainFacts(f, ds, b, &d.idom);
+    // Facts on each edge p -> b into a block with phis: those of p plus p's branch.
+    std::map<std::pair<int, int>, std::vector<Fact>> edgeCache;
+    auto edgeFacts = [&](int p, int b) -> const std::vector<Fact> & {
+        auto key = std::make_pair(p, b);
+        auto it = edgeCache.find(key);
+        if (it != edgeCache.end()) return it->second;
+        std::vector<Fact> ef = facts[p];
+        const Inst &t = f.bb[p].term();
+        if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
+        return edgeCache.emplace(key, std::move(ef)).first->second;
+    };
     auto valRange = [&](Opnd o) -> SR { return o.isConst ? sOfConst(o.c) : sr[o.v]; };
     auto refinedIn = [&](Opnd o, int block) -> SR {
         if (o.isConst) return sOfConst(o.c);
@@ -720,9 +732,7 @@ void computeVRP(Func &f) {
                     for (auto &in : ph.in) {
                         const int p = in.first;
                         if (!d.reachable(p)) continue;
-                        std::vector<Fact> ef = facts[p];
-                        const Inst &t = f.bb[p].term();
-                        if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
+                        const std::vector<Fact> &ef = edgeFacts(p, b);
                         Opnd o = in.second;
                         SR r = o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange);
                         acc = unionSR(acc, r);
@@ -732,7 +742,7 @@ void computeVRP(Func &f) {
                 for (Inst &x : B.insts) {
                     if (x.dst < 0) continue;
                     bool anyEmpty = false;
-                    std::vector<SR> ops(x.n);
+                    SR ops[3];
                     for (int a = 0; a < x.n; a++) {
                         ops[a] = refinedIn(x.a[a], b);
                         if (ops[a].empty()) anyEmpty = true;
@@ -759,9 +769,7 @@ void computeVRP(Func &f) {
                         for (auto &in : ph.in) {
                             const int p = in.first;
                             if (!d.reachable(p)) continue;
-                            std::vector<Fact> ef = facts[p];
-                            const Inst &t = f.bb[p].term();
-                            if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
+                            const std::vector<Fact> &ef = edgeFacts(p, b);
                             Opnd o = in.second;
                             acc = unionSR(acc, o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange));
                         }
@@ -769,7 +777,7 @@ void computeVRP(Func &f) {
                     }
                     for (Inst &x : B.insts) {
                         if (x.dst < 0 || x.op == OP_LOAD || x.op == OP_VLOAD) continue;
-                        std::vector<SR> ops(x.n);
+                        SR ops[3];
                         bool anyEmpty = false;
                         for (int a = 0; a < x.n; a++) {
                             ops[a] = refinedIn(x.a[a], b);

@@ -72,13 +72,16 @@ struct Flags {
 
 // Per-pass wall time, printed with KOPT_TIMING=1 (developer diagnostics only;
 // never influences the output).
+bool timingOn() {
+    static const bool on = getenv("KOPT_TIMING") != nullptr;
+    return on;
+}
 struct PassTimer {
     const char *name;
     std::chrono::steady_clock::time_point t0;
-    explicit PassTimer(const char *n) : name(n), t0(std::chrono::steady_clock::now()) {}
+    explicit PassTimer(const char *n) : name(n) { if (timingOn()) t0 = std::chrono::steady_clock::now(); }
     ~PassTimer() {
-        static const bool on = getenv("KOPT_TIMING") != nullptr;
-        if (on) {
+        if (timingOn()) {
             double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             if (ms > 5) fprintf(stderr, "  %-14s %8.1f ms\n", name, ms);
         }
@@ -328,9 +331,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         return true;
     };
 
-    // The variant search multiplies compile time; it runs only on programs small
-    // enough to stay far inside the 5 s limit on a slower judging machine.
-    const bool small = base.instrCount() <= 4000;
+    // The variant search multiplies compile time, so its size depends on the
+    // program size (never on the clock): the full search up to 1000
+    // instructions, a reduced one up to 4000, a single compile above that.
+    const size_t progSize = base.instrCount();
+    const int effort = progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0);
+    const bool small = effort >= 1;
     std::vector<Cand> cands;
     // Phase 1: the SSA pipeline, in a few flavours.
     {
@@ -342,7 +348,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             {true, true, false, true}, {true, false, true, true}, {false, true, true, true},
             {true, false, false, false}, {false, true, false, false},
         };
-        const int nVariants = small ? 8 : 1;
+        const int nVariants = effort == 2 ? 8 : (effort == 1 ? 2 : 1);
         for (int v = 0; v < nVariants; v++) {
             Flags fl;
             fl.reassoc = kVariants[v][0];
@@ -371,7 +377,8 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             bases.push_back(c);
         };
         for (const Cand *c : sorted) if (c->what == "pipeline") addBase(c);
-        for (const Cand *c : sorted) { if (bases.size() >= 4) break; addBase(c); }
+        const size_t maxBases = effort == 2 ? 4 : 1;
+        for (const Cand *c : sorted) { if (bases.size() >= maxBases) break; addBase(c); }
         std::vector<Program> basePrograms;
         std::vector<std::string> baseNames;
         std::vector<Flags> baseFlags;
@@ -379,18 +386,19 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         const int budget = std::max(24, m.icache_size);
         // Register-form transforms: rotate+unroll by 1/2/4/8, jump threading,
         // and full peeling of short loops (constant trip counts fold away).
-        struct Plan { const char *name; int unroll; int peel; bool thread; int counted; bool unswitch = false; };
+        struct Plan { const char *name; int unroll; int peel; bool thread; int counted; bool unswitch = false; bool reduced = false; };
         static const Plan plans[] = {
-            {"unroll1", 1, 0, false, 0}, {"unroll2", 2, 0, false, 0}, {"unroll4", 4, 0, false, 0},
-            {"unroll8", 8, 0, false, 0}, {"thread", 0, 0, true, 0}, {"peel8", 0, 8, true, 0},
+            {"unroll1", 1, 0, false, 0}, {"unroll2", 2, 0, false, 0, false, true}, {"unroll4", 4, 0, false, 0},
+            {"unroll8", 8, 0, false, 0}, {"thread", 0, 0, true, 0, false, true}, {"peel8", 0, 8, true, 0, false, true},
             {"peel16", 0, 16, true, 0}, {"cunroll2", 1, 0, false, 2}, {"cunroll4", 1, 0, false, 4},
-            {"cunroll8", 1, 0, false, 8}, {"cunroll4r", 1, 0, false, -4}, {"cunroll8r", 1, 0, false, -8},
-            {"unswitch", 0, 0, false, 0, true}, {"unswitch+peel16", 0, 16, true, 0, true},
+            {"cunroll8", 1, 0, false, 8}, {"cunroll4r", 1, 0, false, -4, false, true}, {"cunroll8r", 1, 0, false, -8},
+            {"unswitch", 0, 0, false, 0, true, true}, {"unswitch+peel16", 0, 16, true, 0, true},
             {"unswitch+unroll4", 4, 0, false, 0, true},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
             for (const Plan &pl : plans) {
+                if (effort < 2 && !pl.reduced) continue;
                 std::vector<uint32_t> names;
                 Func rf = toRegisterForm(basePrograms[bi], names);
                 bool any = false;
@@ -421,7 +429,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         // Phase 3: jump threading on the best programs so far (after unrolling
         // and constant folding, repeated tests of one condition become visible).
         // Two rounds: each recompile can expose more known branches.
-        for (int round = 0; round < 2; round++) {
+        for (int round = 0; round < (effort == 2 ? 2 : 0); round++) {
             std::vector<const Cand *> top;
             for (const Cand &c : cands) if (c.ok) top.push_back(&c);
             std::stable_sort(top.begin(), top.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
