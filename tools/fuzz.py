@@ -168,6 +168,49 @@ class Gen(object):
         return "\n".join(lines) + "\n"
 
 
+def ptr_program(rng, mc):
+    """A loop whose memory address is a pointer that grows only in some rounds
+    (output cursors, merges). The address may or may not reach the scratch
+    region (3072+) depending on the base, the step and the trip count, which is
+    exactly what the trip-count range bounds must get right."""
+    g = Gen(rng, mc)
+    g.memmode = "bounded"
+    g.nregs = rng.randint(8, 16)
+    g.nparams = 2
+    n, i, j, k, m, c, a = ("v%d" % (g.nregs + x) for x in range(7))
+    base = rng.choice([0, 64, 1000, 2900, 3000, 3040, 3060, 3064, 3070, 3071])
+    mask = rng.choice([7, 15, 31, 63])
+    step = rng.choice([1, 1, 2, 3, -1, 0])
+    k0 = rng.choice([0, 1, 5, 40])
+    filler = lambda: [ln for _ in range(rng.randint(0, 5)) for ln in (lambda o: (g.instr(o), o)[1])([])]
+    L = ["func f(v0, v1)", "entry:",
+         "  and %s, v0, %d" % (n, mask), "  and %s, v1, %d" % (m, rng.choice([3, 7, 15])),
+         "  const %s, 0" % i, "  const %s, 0" % j, "  const %s, %d" % (k, k0)]
+    L += ["  " + x for x in filler()]
+    L += ["  jmp head", "head:", "  lt %s, %s, %s" % (c, i, n), "  br %s, body, exit" % c, "body:"]
+    L += ["  " + x for x in filler()]
+    if rng.random() < 0.5:
+        # cursor: k moves by `step` in some rounds, i always grows
+        L += ["  and %s, %s, 1" % (c, g.reg()), "  br %s, inc, latch" % c,
+              "inc:", "  add %s, %s, %d" % (k, k, step), "  jmp latch",
+              "latch:", "  add %s, %s, %d" % (i, i, rng.choice([1, 1, 2]))]
+    else:
+        # merge: i or j grows (j only while j < m), k grows every round
+        L += ["  lt %s, %s, %s" % (c, j, m), "  br %s, both, onlyi" % c,
+              "both:", "  and %s, %s, 1" % (c, g.reg()), "  br %s, inci, incj" % c,
+              "inci:", "  add %s, %s, 1" % (i, i), "  jmp latch",
+              "incj:", "  add %s, %s, 1" % (j, j), "  jmp latch",
+              "onlyi:", "  add %s, %s, 1" % (i, i), "  jmp latch",
+              "latch:", "  add %s, %s, %d" % (k, k, max(step, 1))]
+    L += ["  add %s, %s, %d" % (a, k, base)]
+    L.append(rng.choice(["  store %s, %s" % (a, g.reg()), "  load %s, %s" % (g.reg(), a)]))
+    L += ["  " + x for x in filler()]
+    L += ["  jmp head", "exit:", "  add %s, %s, %d" % (a, k, base), "  load %s, %s" % (c, a)]
+    L += ["  " + x for x in filler()]
+    L += ["  ret %s" % rng.choice([c, g.reg()])]
+    return "\n".join(L) + "\n"
+
+
 def write_machine(path, mc):
     with open(path, "w") as f:
         for k, v in mc.items():
@@ -178,7 +221,7 @@ def one(args):
     idx, seed, ninputs = args
     rng = random.Random(seed * 1000003 + idx)
     mc = rand_machine(rng)
-    src = Gen(rng, mc).program()
+    src = ptr_program(rng, mc) if rng.random() < 0.25 else Gen(rng, mc).program()
     with tempfile.TemporaryDirectory() as td:
         pin, pout, pm = (os.path.join(td, n) for n in ("in.kir", "out.kir", "m.cfg"))
         with open(pin, "w") as f:

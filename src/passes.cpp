@@ -376,11 +376,19 @@ void factsFromCond(const Func &f, const std::vector<DefSite> &ds, Opnd c, bool t
 }
 
 // Facts that hold on entry to block b: walk the chain of single predecessors.
-std::vector<Fact> chainFacts(const Func &f, const std::vector<DefSite> &ds, int b) {
+// With idom (dominators of the current CFG): walk up the dominator tree
+// instead. A block a with a single predecessor p is entered only along the
+// edge p->a, so the branch fact of that edge holds in every block a dominates.
+std::vector<Fact> chainFacts(const Func &f, const std::vector<DefSite> &ds, int b,
+                             const std::vector<int> *idom = nullptr) {
     std::vector<Fact> out;
-    for (int depth = 0; depth < 24 && b > 0; depth++) {
+    for (int depth = 0; depth < 48 && b > 0; depth++) {
         const BB &B = f.bb[b];
-        if (B.preds.size() != 1) break;
+        if (B.preds.size() != 1) {
+            if (!idom) break;
+            b = (*idom)[b];
+            continue;
+        }
         const int p = B.preds[0];
         const Inst &t = f.bb[p].term();
         if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, out, 0);
@@ -490,6 +498,144 @@ SR transfer(const Inst &x, const std::function<SR(int)> &R) {
 
 std::vector<SR> gVRP;   // signed ranges from the last computeVRP (by value)
 
+// Trip-count bounds for innermost loops (from a sound range solution sr).
+// Every path from the header back to it (the loop body without inner loops is
+// a DAG) changes each header phi by an exact constant, or by something we
+// cannot follow. If a set S of header phis with bounded ranges only grows,
+// and on every path their sum grows by at least 1, the back edges are taken at
+// most B = sum of the range widths of S times per entry into the loop. A
+// header phi that changes by [dmin, dmax] per path then stays within
+// init + B*[min(dmin,0), max(dmax,0)]. Example: merge loops (k grows each round
+// while i or j grows), output pointers that grow in some rounds only.
+bool tripCaps(const Func &f, const DomInfo &d, const std::vector<DefSite> &ds, const std::vector<SR> &sr,
+              std::vector<SR> &cap) {
+    LoopInfo li = computeLoops(f, d);
+    bool any = false;
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        bool innermost = true;
+        for (size_t o = 0; o < li.loops.size(); o++)
+            if (o != l && li.loops[o].parent == static_cast<int>(l)) innermost = false;
+        const int h = L.header;
+        const BB &H = f.bb[h];
+        if (!innermost || H.phis.empty() || h == 0) continue;
+        std::vector<char> in(f.bb.size(), 0);
+        for (int b : L.blocks) in[b] = 1;
+        // Enumerate paths header -> latch (edges into h end a path).
+        std::vector<std::vector<int>> paths;
+        std::vector<int> cur{h};
+        bool tooMany = false;
+        std::function<void(int)> dfs = [&](int b) {
+            if (tooMany) return;
+            int s[2];
+            int ns = f.succs(b, s);
+            for (int i = 0; i < ns && !tooMany; i++) {
+                if (i == 1 && s[1] == s[0]) continue;
+                const int t = s[i];
+                if (t < 0 || !in[t]) continue;
+                if (t == h) {
+                    if (paths.size() >= 48) { tooMany = true; return; }
+                    paths.push_back(cur);
+                    continue;
+                }
+                if (cur.size() > 64) { tooMany = true; return; }
+                for (int c : cur) if (c == t) { tooMany = true; return; }   // not a DAG: give up
+                cur.push_back(t);
+                dfs(t);
+                cur.pop_back();
+            }
+        };
+        dfs(h);
+        if (tooMany || paths.empty()) continue;
+        const int np = static_cast<int>(H.phis.size());
+        // delta[v][p]: exact change of header phi v along path p (or none).
+        std::vector<std::vector<int64_t>> delta(np, std::vector<int64_t>(paths.size(), 0));
+        std::vector<char> known(np, 1);
+        for (size_t pi = 0; pi < paths.size() && true; pi++) {
+            const std::vector<int> &P = paths[pi];
+            auto pos = [&](int b) { for (size_t i = 0; i < P.size(); i++) if (P[i] == b) return static_cast<int>(i); return -1; };
+            for (int v = 0; v < np; v++) {
+                if (!known[v]) continue;
+                const Phi &ph = H.phis[v];
+                Opnd x;
+                bool got = false;
+                for (auto &inc : ph.in) if (inc.first == P.back()) { x = inc.second; got = true; }
+                if (!got) { known[v] = 0; continue; }
+                int64_t acc = 0;
+                bool ok = false;
+                for (int step = 0; step < 32; step++) {
+                    if (x.isConst) break;
+                    if (x.v == ph.dst) { ok = true; break; }
+                    const DefSite &dsx = ds[x.v];
+                    if (dsx.block < 0) break;
+                    if (dsx.isPhi) {
+                        if (dsx.block == h) break;
+                        const int m = pos(dsx.block);
+                        if (m <= 0) break;
+                        const Phi *q = nullptr;
+                        for (const Phi &pp : f.bb[dsx.block].phis) if (pp.dst == x.v) q = &pp;
+                        if (!q) break;
+                        bool found = false;
+                        for (auto &inc : q->in) if (inc.first == P[m - 1]) { x = inc.second; found = true; }
+                        if (!found) break;
+                        continue;
+                    }
+                    const Inst &y = f.bb[dsx.block].insts[dsx.idx];
+                    if (y.op == OP_MOV) { x = y.a[0]; continue; }
+                    if (y.op == OP_ADD && y.a[1].isConst && !y.a[0].isConst) { acc += static_cast<int32_t>(y.a[1].c); x = y.a[0]; continue; }
+                    if (y.op == OP_ADD && y.a[0].isConst && !y.a[1].isConst) { acc += static_cast<int32_t>(y.a[0].c); x = y.a[1]; continue; }
+                    if (y.op == OP_SUB && y.a[1].isConst && !y.a[0].isConst) { acc -= static_cast<int32_t>(y.a[1].c); x = y.a[0]; continue; }
+                    break;
+                }
+                if (!ok || acc > (1 << 20) || acc < -(1 << 20)) { known[v] = 0; continue; }
+                delta[v][pi] = acc;
+            }
+        }
+        // The measure S: known, never decreasing, bounded header phis.
+        int64_t B = 0;
+        std::vector<char> inS(np, 0);
+        for (int v = 0; v < np; v++) {
+            if (!known[v]) continue;
+            const SR r = sr[H.phis[v].dst];
+            if (r.empty() || r.hi - r.lo > (1 << 20)) continue;
+            bool nonneg = true;
+            for (size_t pi = 0; pi < paths.size(); pi++) if (delta[v][pi] < 0) nonneg = false;
+            if (!nonneg) continue;
+            inS[v] = 1;
+            B += r.hi - r.lo;
+        }
+        bool measure = B <= (1 << 22);
+        for (size_t pi = 0; pi < paths.size() && measure; pi++) {
+            int64_t sum = 0;
+            for (int v = 0; v < np; v++) if (inS[v]) sum += delta[v][pi];
+            if (sum < 1) measure = false;
+        }
+        if (!measure) continue;
+        for (int v = 0; v < np; v++) {
+            if (!known[v]) continue;
+            const Phi &ph = H.phis[v];
+            SR init;
+            for (auto &inc : ph.in) {
+                if (in[inc.first]) continue;
+                init = unionSR(init, inc.second.isConst ? SR::pt(static_cast<int32_t>(inc.second.c)) : sr[inc.second.v]);
+            }
+            if (init.empty() || init.lo == kSMin || init.hi == kSMax) continue;
+            int64_t dmin = 0, dmax = 0;
+            for (size_t pi = 0; pi < paths.size(); pi++) { dmin = std::min(dmin, delta[v][pi]); dmax = std::max(dmax, delta[v][pi]); }
+            SR c{init.lo + B * dmin, init.hi + B * dmax};
+            if (c.lo < kSMin || c.hi > kSMax) continue;
+            SR &old = cap[ph.dst];
+            SR nc{std::max(old.lo, c.lo), std::min(old.hi, c.hi)};
+            if (nc.empty() || (nc.lo == old.lo && nc.hi == old.hi)) continue;
+            old = nc;
+            any = true;
+        }
+    }
+    return any;
+}
+
+
+
 }  // namespace
 
 void computeVRP(Func &f) {
@@ -504,91 +650,70 @@ void computeVRP(Func &f) {
     for (Val p : f.params) sr[p] = SR::full();
     const int nb = static_cast<int>(f.bb.size());
     std::vector<std::vector<Fact>> facts(nb);
-    for (int b : d.rpo) facts[b] = chainFacts(f, ds, b);
+    for (int b : d.rpo) facts[b] = chainFacts(f, ds, b, &d.idom);
     auto valRange = [&](Opnd o) -> SR { return o.isConst ? sOfConst(o.c) : sr[o.v]; };
     auto refinedIn = [&](Opnd o, int block) -> SR {
         if (o.isConst) return sOfConst(o.c);
         return refine(sr[o.v], o.v, facts[block], valRange);
     };
-    // Widening thresholds: constants the program compares against (and +-1),
-    // so a counter bounded by "i < 8" widens to 8 rather than to 2^31-1.
+    // Widening thresholds: the program's constants (and +-1), so a counter
+    // bounded by "i < 8" or by "n & 15" widens to that bound rather than to
+    // 2^31-1. Every widening step moves to the next threshold, so the number
+    // of steps stays finite.
     std::vector<int64_t> thr;
     for (BB &B : f.bb) {
         if (!B.alive) continue;
         for (Inst &x : B.insts)
-            if (x.op == OP_LT || x.op == OP_EQ)
-                for (int a = 0; a < x.n; a++)
-                    if (x.a[a].isConst) {
-                        int64_t c = static_cast<int32_t>(x.a[a].c);
-                        for (int64_t dlt = -1; dlt <= 1; dlt++) thr.push_back(c + dlt);
-                    }
+            for (int a = 0; a < x.n; a++)
+                if (x.a[a].isConst) {
+                    int64_t c = static_cast<int32_t>(x.a[a].c);
+                    for (int64_t dlt = -1; dlt <= 1; dlt++) thr.push_back(c + dlt);
+                }
     }
     std::sort(thr.begin(), thr.end());
     thr.erase(std::unique(thr.begin(), thr.end()), thr.end());
-    bool settled = false;
-    for (int iter = 0; iter < 60 && !settled; iter++) {
-        settled = true;
-        for (int b : d.rpo) {
-            BB &B = f.bb[b];
-            auto update = [&](Val v, SR nr) {
-                SR old = sr[v];
-                SR u = unionSR(old, nr);
-                if (u.lo == old.lo && u.hi == old.hi && !old.empty()) return;
-                if (old.empty() && u.empty()) return;
-                if (!old.empty() && ++grow[v] > 4) {
-                    const bool far = grow[v] > 12;   // thresholds first, then the limits
-                    if (u.lo < old.lo) {
-                        int64_t t = kSMin;
-                        if (!far) for (auto it = thr.rbegin(); it != thr.rend(); ++it) if (*it <= u.lo) { t = *it; break; }
-                        u.lo = t;
-                    }
-                    if (u.hi > old.hi) {
-                        int64_t t = kSMax;
-                        if (!far) for (int64_t c : thr) if (c >= u.hi) { t = c; break; }
-                        u.hi = t;
-                    }
-                }
-                sr[v] = u;
-                settled = false;
-            };
-            for (Phi &ph : B.phis) {
-                SR acc;
-                for (auto &in : ph.in) {
-                    const int p = in.first;
-                    if (!d.reachable(p)) continue;
-                    std::vector<Fact> ef = facts[p];
-                    const Inst &t = f.bb[p].term();
-                    if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
-                    Opnd o = in.second;
-                    SR r = o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange);
-                    acc = unionSR(acc, r);
-                }
-                update(ph.dst, acc);
-            }
-            for (Inst &x : B.insts) {
-                if (x.dst < 0) continue;
-                bool anyEmpty = false;
-                std::vector<SR> ops(x.n);
-                for (int a = 0; a < x.n; a++) {
-                    ops[a] = refinedIn(x.a[a], b);
-                    if (ops[a].empty()) anyEmpty = true;
-                }
-                if (anyEmpty && x.op != OP_LOAD && x.op != OP_VLOAD) continue;   // not reached yet
-                SR nr = (x.op == OP_LOAD || x.op == OP_VLOAD) ? SR::full() : transfer(x, [&](int i) { return ops[i]; });
-                update(x.dst, nr);
-            }
-        }
+    if (thr.size() > 192) {   // keep the search cheap on huge programs: a spread sample
+        std::vector<int64_t> keep;
+        for (size_t i = 0; i < 192; i++) keep.push_back(thr[i * thr.size() / 192]);
+        thr.swap(keep);
     }
-    // Narrowing: from a sound over-approximation, x := x intersect F(x) stays
-    // sound and recovers the bounds that widening threw away (i < 8 => i <= 8).
-    if (settled) {
-        for (int pass = 0; pass < 4; pass++) {
+    // Caps: proven bounds of header phis (from trip counts), applied on top.
+    std::vector<SR> cap(nv, SR::full());
+    auto capped = [&](Val v, SR r) {
+        if (r.empty()) return r;
+        SR x{std::max(r.lo, cap[v].lo), std::min(r.hi, cap[v].hi)};
+        return x.empty() ? r : x;
+    };
+    bool settled = false;
+    auto solve = [&]() {
+        std::fill(sr.begin(), sr.end(), SR());
+        std::fill(grow.begin(), grow.end(), 0);
+        for (Val p : f.params) sr[p] = SR::full();
+        settled = false;
+        for (int iter = 0; iter < 100 && !settled; iter++) {
+            settled = true;
             for (int b : d.rpo) {
                 BB &B = f.bb[b];
-                auto narrow = [&](Val v, SR nr) {
-                    if (nr.empty() || sr[v].empty()) return;
-                    SR x{std::max(sr[v].lo, nr.lo), std::min(sr[v].hi, nr.hi)};
-                    if (!x.empty()) sr[v] = x;
+                auto update = [&](Val v, SR nr) {
+                    SR old = sr[v];
+                    SR u = unionSR(old, nr);
+                    if (u.lo == old.lo && u.hi == old.hi && !old.empty()) return;
+                    if (old.empty() && u.empty()) return;
+                    if (!old.empty() && ++grow[v] > 4) {
+                        const bool far = grow[v] > 28;   // thresholds first, then the limits
+                        if (u.lo < old.lo) {
+                            int64_t t = kSMin;
+                            if (!far) for (auto it = thr.rbegin(); it != thr.rend(); ++it) if (*it <= u.lo) { t = *it; break; }
+                            u.lo = t;
+                        }
+                        if (u.hi > old.hi) {
+                            int64_t t = kSMax;
+                            if (!far) for (int64_t c : thr) if (c >= u.hi) { t = c; break; }
+                            u.hi = t;
+                        }
+                    }
+                    sr[v] = u;
+                    settled = false;
                 };
                 for (Phi &ph : B.phis) {
                     SR acc;
@@ -599,22 +724,71 @@ void computeVRP(Func &f) {
                         const Inst &t = f.bb[p].term();
                         if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
                         Opnd o = in.second;
-                        acc = unionSR(acc, o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange));
+                        SR r = o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange);
+                        acc = unionSR(acc, r);
                     }
-                    narrow(ph.dst, acc);
+                    update(ph.dst, capped(ph.dst, acc));
                 }
                 for (Inst &x : B.insts) {
-                    if (x.dst < 0 || x.op == OP_LOAD || x.op == OP_VLOAD) continue;
-                    std::vector<SR> ops(x.n);
+                    if (x.dst < 0) continue;
                     bool anyEmpty = false;
+                    std::vector<SR> ops(x.n);
                     for (int a = 0; a < x.n; a++) {
                         ops[a] = refinedIn(x.a[a], b);
                         if (ops[a].empty()) anyEmpty = true;
                     }
-                    if (anyEmpty) continue;
-                    narrow(x.dst, transfer(x, [&](int i) { return ops[i]; }));
+                    if (anyEmpty && x.op != OP_LOAD && x.op != OP_VLOAD) continue;   // not reached yet
+                    SR nr = (x.op == OP_LOAD || x.op == OP_VLOAD) ? SR::full() : transfer(x, [&](int i) { return ops[i]; });
+                    update(x.dst, nr);
                 }
             }
+        }
+        // Narrowing: from a sound over-approximation, x := x intersect F(x) stays
+        // sound and recovers the bounds that widening threw away (i < 8 => i <= 8).
+        if (settled) {
+            for (int pass = 0; pass < 4; pass++) {
+                for (int b : d.rpo) {
+                    BB &B = f.bb[b];
+                    auto narrow = [&](Val v, SR nr) {
+                        if (nr.empty() || sr[v].empty()) return;
+                        SR x{std::max(sr[v].lo, nr.lo), std::min(sr[v].hi, nr.hi)};
+                        if (!x.empty()) sr[v] = x;
+                    };
+                    for (Phi &ph : B.phis) {
+                        SR acc;
+                        for (auto &in : ph.in) {
+                            const int p = in.first;
+                            if (!d.reachable(p)) continue;
+                            std::vector<Fact> ef = facts[p];
+                            const Inst &t = f.bb[p].term();
+                            if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
+                            Opnd o = in.second;
+                            acc = unionSR(acc, o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange));
+                        }
+                        narrow(ph.dst, capped(ph.dst, acc));
+                    }
+                    for (Inst &x : B.insts) {
+                        if (x.dst < 0 || x.op == OP_LOAD || x.op == OP_VLOAD) continue;
+                        std::vector<SR> ops(x.n);
+                        bool anyEmpty = false;
+                        for (int a = 0; a < x.n; a++) {
+                            ops[a] = refinedIn(x.a[a], b);
+                            if (ops[a].empty()) anyEmpty = true;
+                        }
+                        if (anyEmpty) continue;
+                        narrow(x.dst, transfer(x, [&](int i) { return ops[i]; }));
+                    }
+                }
+            }
+        }
+    };
+    solve();
+    if (settled) {
+        // Second round with trip-count caps; keep the first if it does not settle.
+        std::vector<SR> first = sr;
+        if (tripCaps(f, d, ds, sr, cap)) {
+            solve();
+            if (!settled) { sr = first; settled = true; }
         }
     }
     if (getenv("KOPT_DEBUGRANGE")) {
@@ -639,10 +813,11 @@ namespace {
 
 // Range of an operand where it is used in block b: its global range refined by
 // the branch facts that guard b.
-Range rangeAt(const Func &f, const std::vector<DefSite> &ds, Opnd o, int b) {
+Range rangeAt(const Func &f, const std::vector<DefSite> &ds, Opnd o, int b,
+              const std::vector<int> *idom = nullptr) {
     Range r = rangeOf(f, ds, o, 8);
     if (o.isConst || b < 0) return r;
-    std::vector<Fact> facts = chainFacts(f, ds, b);
+    std::vector<Fact> facts = chainFacts(f, ds, b, idom);
     if (facts.empty()) return r;
     auto other = [&](Opnd x) -> SR { return fromRange(rangeOf(f, ds, x, 6)); };
     SR s = refine(fromRange(r), o.v, facts, other);
@@ -834,13 +1009,14 @@ bool memoryAccessesBelow(Func &f, uint32_t limit) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);
     f.rebuildPreds();
+    DomInfo dom = computeDominators(f);
     for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
         BB &B = f.bb[b];
-        if (!B.alive) continue;
+        if (!B.alive || !dom.reachable(b)) continue;
         for (Inst &x : B.insts)
-            if ((x.op == OP_LOAD || x.op == OP_STORE) && rangeAt(f, ds, x.a[0], b).hi >= limit) {
+            if ((x.op == OP_LOAD || x.op == OP_STORE) && rangeAt(f, ds, x.a[0], b, &dom.idom).hi >= limit) {
                 if (getenv("KOPT_DEBUGRANGE")) {
-                    Range r = rangeAt(f, ds, x.a[0], b);
+                    Range r = rangeAt(f, ds, x.a[0], b, &dom.idom);
                     fprintf(stderr, "unbounded %s in B%d addr %%%d range [%llu,%llu]\n", opName(x.op), b, x.a[0].isConst ? -1 : x.a[0].v,
                             (unsigned long long)r.lo, (unsigned long long)r.hi);
                 }
