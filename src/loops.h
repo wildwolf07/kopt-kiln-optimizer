@@ -38,4 +38,13 @@ bool peelLoops(Func &f, int count, int sizeBudget);
 // edge gets its own copy of the block ending in a plain jump.
 bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs);
 
+// Counted-loop unrolling. For an innermost loop whose single latch ends with
+//   add i, i, s ; lt c, i, n ; br c, HEADER, EXIT
+// (s > 0 constant, i written only there, n loop-invariant), a group of
+// `factor` body copies runs without the intermediate tests while
+// n - i > (factor-1)*s (signed; a wrapped difference just picks the original
+// loop). The original loop stays as the remainder. New registers get names
+// appended to regNames.
+bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget);
+
 }  // namespace kopt

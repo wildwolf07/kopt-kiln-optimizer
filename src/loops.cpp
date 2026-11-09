@@ -283,4 +283,138 @@ bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs) {
     return changed;
 }
 
+bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget) {
+    if (factor < 2) return false;
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    bool changed = false;
+    uint32_t nextName = 0;
+    for (uint32_t r : regNames) nextName = std::max(nextName, r + 1);
+    auto freshReg = [&]() {
+        int v = f.newVal();
+        regNames.push_back(nextName++);
+        return v;
+    };
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop L = li.loops[l];
+        bool innermost = true;
+        for (size_t o = 0; o < li.loops.size(); o++)
+            if (o != l && li.loops[o].parent == static_cast<int>(l)) innermost = false;
+        const int h = L.header;
+        if (!innermost || irr[h] || h == 0 || L.latches.size() != 1) continue;
+        const int t = L.latches[0];
+        std::vector<char> in(f.bb.size(), 0);
+        for (int b : L.blocks) in[b] = 1;
+        const BB &T = f.bb[t];
+        const Inst br = T.term();   // a copy: f.bb grows below
+        if (br.op != OP_BR || br.a[0].isConst || br.tgt[0] != h || in[br.tgt[1]]) continue;
+        const int c = br.a[0].v;
+        // Find "lt c, i, n" and "add i, i, s" in T: the add before the lt, and
+        // no other write of i, n or c after them in T.
+        int ltPos = -1, addPos = -1;
+        for (int k = static_cast<int>(T.insts.size()) - 2; k >= 0; k--)
+            if (T.insts[k].dst == c) { ltPos = k; break; }
+        if (ltPos < 0 || T.insts[ltPos].op != OP_LT || T.insts[ltPos].a[0].isConst) continue;
+        const int iv = T.insts[ltPos].a[0].v;
+        const Opnd n = T.insts[ltPos].a[1];
+        if (!n.isConst && n.v == iv) continue;
+        for (int k = ltPos - 1; k >= 0; k--)
+            if (T.insts[k].dst == iv) { addPos = k; break; }
+        if (addPos < 0) continue;
+        const Inst &add = T.insts[addPos];
+        uint32_t step = 0;
+        if (add.op == OP_ADD && !add.a[0].isConst && add.a[0].v == iv && add.a[1].isConst) step = add.a[1].c;
+        else if (add.op == OP_ADD && !add.a[1].isConst && add.a[1].v == iv && add.a[0].isConst) step = add.a[0].c;
+        if (step == 0 || step > 65536) continue;
+        const uint64_t K = static_cast<uint64_t>(factor - 1) * step;
+        if (K >= 0x7fffffffull) continue;
+        // i written exactly once in the loop; n not written in the loop.
+        int ivWrites = 0;
+        bool nWritten = false;
+        int size = 0;
+        for (int b : L.blocks) {
+            size += static_cast<int>(f.bb[b].insts.size());
+            for (const Inst &x : f.bb[b].insts) {
+                if (x.dst == iv) ivWrites++;
+                if (!n.isConst && x.dst == n.v) nWritten = true;
+            }
+        }
+        if (ivWrites != 1 || nWritten) continue;
+        // No write of c between lt and br (it is the last write by construction).
+        if (size * (factor + 1) > sizeBudget) continue;
+
+        const int n0 = static_cast<int>(f.bb.size());
+        std::vector<std::unordered_map<int, int>> clone(factor);
+        for (int k = 0; k < factor; k++)
+            for (int b : L.blocks) {
+                clone[k][b] = static_cast<int>(f.bb.size());
+                BB copy = f.bb[b];
+                copy.label.clear();
+                f.bb.push_back(copy);
+            }
+        // P (once, before the loop):  m = n - K ; f0 = m < n   (f0: no wrap)
+        // D (per group):              q = i < m ; q = q & f0 ; br q, group, R
+        // R (leaving the groups):     c = i < n ; br c, original loop, EXIT
+        // i < m with no wrap means i + (factor-1)*s < n, so every test inside
+        // the group would have been true.
+        // Two guard blocks: D1 for entries from outside (the original loop runs
+        // its body at least once, so its "no" side is the original header) and
+        // D2 after a group (its "no" side re-tests i < n in R).
+        const int m = freshReg(), f0 = freshReg(), q = freshReg();
+        const int P = static_cast<int>(f.bb.size());
+        const int D = P + 1, R = P + 2, D1 = P + 3;
+        const int exitBlock = br.tgt[1];
+        auto mk = [](Op op, int dst, Opnd a, Opnd b) {
+            Inst x;
+            x.op = op; x.dst = dst; x.n = 2; x.a[0] = a; x.a[1] = b;
+            return x;
+        };
+        {
+            BB pb, db, rb;
+            Inst j;
+            j.op = OP_JMP; j.tgt[0] = D;
+            j.tgt[0] = D1;
+            pb.insts = {mk(OP_SUB, m, n, Opnd::cst(static_cast<uint32_t>(K))), mk(OP_LT, f0, Opnd::val(m), n), j};
+            Inst b1;
+            b1.op = OP_BR; b1.n = 1; b1.a[0] = Opnd::val(q); b1.tgt[0] = clone[0][h]; b1.tgt[1] = R;
+            db.insts = {mk(OP_LT, q, Opnd::val(iv), Opnd::val(m)), mk(OP_AND, q, Opnd::val(q), Opnd::val(f0)), b1};
+            Inst b2;
+            b2.op = OP_BR; b2.n = 1; b2.a[0] = Opnd::val(c); b2.tgt[0] = h; b2.tgt[1] = exitBlock;
+            rb.insts = {mk(OP_LT, c, Opnd::val(iv), n), b2};
+            BB d1 = db;
+            d1.insts.back().tgt[1] = h;
+            f.bb.push_back(pb);
+            f.bb.push_back(db);
+            f.bb.push_back(rb);
+            f.bb.push_back(d1);
+        }
+        for (int k = 0; k < factor; k++) {
+            for (int b : L.blocks) {
+                Inst &tt = f.bb[clone[k][b]].term();
+                int nt = (tt.op == OP_JMP) ? 1 : (tt.op == OP_BR ? 2 : 0);
+                for (int s2 = 0; s2 < nt; s2++) {
+                    int target = tt.tgt[s2];
+                    if (target >= n0 || !in[target]) continue;
+                    if (target != h) tt.tgt[s2] = clone[k][target];
+                }
+            }
+            Inst &term = f.bb[clone[k][t]].term();   // br c, h, EXIT  ->  jump on
+            term.op = OP_JMP; term.n = 0; term.tgt[0] = (k + 1 < factor) ? clone[k + 1][h] : D; term.tgt[1] = -1;
+        }
+        // Entries from outside the loop go through P. The original loop stays as
+        // the remainder (entered from R, or from D's false side through R).
+        for (int b = 0; b < n0; b++) {
+            if (in[b] || !f.bb[b].alive) continue;
+            Inst &tt = f.bb[b].term();
+            int nt = (tt.op == OP_JMP) ? 1 : (tt.op == OP_BR ? 2 : 0);
+            for (int s2 = 0; s2 < nt; s2++) if (tt.tgt[s2] == h) tt.tgt[s2] = P;
+        }
+        changed = true;
+    }
+    if (changed) f.rebuildPreds();
+    return changed;
+}
+
 }  // namespace kopt

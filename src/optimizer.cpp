@@ -304,10 +304,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         const int budget = std::max(24, m.icache_size);
         // Register-form transforms: rotate+unroll by 1/2/4/8, jump threading,
         // and full peeling of short loops (constant trip counts fold away).
-        struct Plan { const char *name; int unroll; int peel; bool thread; };
+        struct Plan { const char *name; int unroll; int peel; bool thread; int counted; };
         static const Plan plans[] = {
-            {"unroll1", 1, 0, false}, {"unroll2", 2, 0, false}, {"unroll4", 4, 0, false},
-            {"unroll8", 8, 0, false}, {"thread", 0, 0, true}, {"peel8", 0, 8, true}, {"peel16", 0, 16, true},
+            {"unroll1", 1, 0, false, 0}, {"unroll2", 2, 0, false, 0}, {"unroll4", 4, 0, false, 0},
+            {"unroll8", 8, 0, false, 0}, {"thread", 0, 0, true, 0}, {"peel8", 0, 8, true, 0},
+            {"peel16", 0, 16, true, 0}, {"cunroll2", 1, 0, false, 2}, {"cunroll4", 1, 0, false, 4},
+            {"cunroll8", 1, 0, false, 8},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
@@ -319,7 +321,13 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 if (pl.thread) any |= threadJumps(rf, 12, 256);
                 if (pl.unroll) {
                     any |= rotateLoops(rf, 8);
-                    any |= unrollLoops(rf, pl.unroll, budget);
+                    if (pl.counted) {
+                        // every innermost counted loop, one at a time
+                        if (!countedUnroll(rf, names, pl.counted, 2 * budget)) continue;
+                        any = true;
+                    } else {
+                        any |= unrollLoops(rf, pl.unroll, budget);
+                    }
                 }
                 if (!any) continue;
                 Program transformed = fromRegisterForm(rf, names);

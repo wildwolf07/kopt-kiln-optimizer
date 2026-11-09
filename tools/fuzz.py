@@ -62,6 +62,7 @@ class Gen(object):
         # none: no memory at all; bounded: every address provably < 3072 (so kopt
         # may use the scratch region for spills); any: anything, including traps.
         self.memmode = rng.choice(["none", "bounded", "any", "any"])
+        self.counted = rng.random() < 0.5
 
     def reg(self):
         return "v%d" % self.rng.randrange(self.nregs)
@@ -142,7 +143,16 @@ class Gen(object):
             lines.extend("  " + b for b in body)
             r = rng.random()
             later = labels[i + 1:] or [labels[-1]]
-            if r < 0.08:
+            if r < 0.30 and i < nb - 1 and self.counted:
+                # counted self-loop: add i, i, s ; lt c, i, n ; br c, self, next
+                iv, c = self.reg(), self.reg()
+                n = rng.choice([self.reg(), str(rng.choice([0, 5, 17, 40, -3, 2147483647, -2147483648]))])
+                if iv == c:
+                    c = ctr
+                lines.append("  add %s, %s, %d" % (iv, iv, rng.choice([1, 1, 2, 3])))
+                lines.append("  lt %s, %s, %s" % (c, iv, n))
+                lines.append("  br %s, %s, %s" % (c, lab, rng.choice(later)))
+            elif r < 0.08:
                 lines.append("  trap %s" % self.src())
             elif r < 0.2 or i == nb - 1:
                 lines.append("  ret %s" % self.src())
