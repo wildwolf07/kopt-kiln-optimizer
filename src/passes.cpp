@@ -2278,11 +2278,21 @@ bool closedFormLoops(Func &f) {
             lo = -2147483648ll; hi = 2147483647ll;
             return true;
         };
+        // Which side of the test is the counter (a header phi)?
+        auto headerPhi = [&](Opnd o) {
+            if (o.isConst) return false;
+            for (const Phi &ph : H.phis) if (ph.dst == o.v) return true;
+            return false;
+        };
+        const Opnd ca = f.resolve(cond->a[0]), cb = f.resolve(cond->a[1]);
         Opnd iv, n;
-        bool inclusive = false;
-        if (!swapped) { iv = f.resolve(cond->a[0]); n = f.resolve(cond->a[1]); }
-        else { iv = f.resolve(cond->a[1]); n = f.resolve(cond->a[0]); inclusive = true; }   // leave when n < i
-        if (iv.isConst || !invariant(n)) continue;
+        bool ivLeft;
+        if (headerPhi(ca) && invariant(cb)) { iv = ca; n = cb; ivLeft = true; }
+        else if (headerPhi(cb) && invariant(ca)) { iv = cb; n = ca; ivLeft = false; }
+        else continue;
+        // Stay condition: iv < n (up), iv <= n (up, inclusive), n < iv (down), n <= iv (down, inclusive).
+        const bool down = (!swapped && !ivLeft) || (swapped && ivLeft);
+        const bool inclusive = swapped;
         const Phi *ip = nullptr;
         for (const Phi &ph : H.phis) if (ph.dst == iv.v) ip = &ph;
         if (!ip || ip->in.size() != 2) continue;
@@ -2296,17 +2306,27 @@ bool closedFormLoops(Func &f) {
             if (a == iv && b.isConst) kstep = b.c;
             else if (b == iv && a.isConst) kstep = a.c;
             else continue;
-            if (kstep < 1 || kstep > 65536) continue;
         }
-        // Bound n' (the loop runs while i < n'): i + k never wraps when n' + k - 1 <= INT_MAX.
+        // kabs: the step's size; up loops add it, down loops subtract it.
+        const int64_t kSigned = static_cast<int32_t>(kstep);
+        if (down ? !(kSigned <= -1 && kSigned >= -65536) : !(kSigned >= 1 && kSigned <= 65536)) continue;
+        const uint32_t kabs = static_cast<uint32_t>(down ? -kSigned : kSigned);
         int64_t nlo, nhi, ilo, ihi;
         sRange(n, nlo, nhi);
         sRange(i0, ilo, ihi);
-        const int64_t nphi = inclusive ? nhi + 1 : nhi;
-        if (nphi + static_cast<int64_t>(kstep) - 1 > 2147483647ll) continue;
-        const bool pow2 = (kstep & (kstep - 1)) == 0;
-        // Non-power-of-two steps divide with the signed div: d + k - 1 must stay below 2^31.
-        if (!pow2 && nphi - ilo + static_cast<int64_t>(kstep) - 1 >= 2147483648ll) continue;
+        const bool pow2 = (kabs & (kabs - 1)) == 0;
+        if (!down) {
+            // Runs while i < n' (n' = n or n + 1): i + k never wraps when n' + k - 1 <= INT_MAX.
+            const int64_t nphi = inclusive ? nhi + 1 : nhi;
+            if (nphi + static_cast<int64_t>(kabs) - 1 > 2147483647ll) continue;
+            // Non-power-of-two steps use the signed div: d + k - 1 must stay below 2^31.
+            if (!pow2 && nphi - ilo + static_cast<int64_t>(kabs) - 1 >= 2147483648ll) continue;
+        } else {
+            // Runs while i > m' (m' = n or n - 1): i - k never wraps when m' - k + 1 >= INT_MIN.
+            const int64_t mplo = inclusive ? nlo - 1 : nlo;
+            if (mplo - static_cast<int64_t>(kabs) + 1 < -2147483648ll) continue;
+            if (!pow2 && ihi - mplo + static_cast<int64_t>(kabs) - 1 >= 2147483648ll) continue;
+        }
         // Values made in the loop may only be used in the loop (header phis excepted).
         std::vector<char> inLoopVal(f.nvals, 0);
         for (int b : L.blocks) for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inLoopVal[x.dst] = 1;
@@ -2338,7 +2358,7 @@ bool closedFormLoops(Func &f) {
             emit.push_back(t);
             return Opnd::val(t.dst);
         };
-        struct P { Opnd c[3]; uint32_t sc = 0; Val s = -1; bool ok = true; };
+        struct P { Opnd c[4]; uint32_t sc = 0; Val s = -1; bool ok = true; };
         auto zeroP = [&]() { P p; for (auto &c : p.c) c = Opnd::cst(0); return p; };
         std::unordered_map<int, P> memo;
         std::function<P(Opnd, int)> eval = [&](Opnd o, int depth) -> P {
@@ -2364,7 +2384,7 @@ bool closedFormLoops(Func &f) {
                 a = eval(x->a[0], depth + 1); b = eval(x->a[1], depth + 1);
                 if (!a.ok || !b.ok || (a.sc && b.sc) || (a.sc && b.s >= 0) ) { r.ok = false; break; }
                 const Op op = x->op;
-                for (int k = 0; k < 3; k++) r.c[k] = bin(op, a.c[k], b.c[k]);
+                for (int k = 0; k < 4; k++) r.c[k] = bin(op, a.c[k], b.c[k]);
                 if (op == OP_SUB && b.sc) { r.ok = false; break; }
                 r.sc = a.sc + b.sc; r.s = a.sc ? a.s : b.s;
                 break;
@@ -2380,9 +2400,9 @@ bool closedFormLoops(Func &f) {
                 }
                 if (!a.ok || !b.ok || a.sc || b.sc) { r.ok = false; break; }
                 // degree check
-                auto deg = [](const P &p) { int dg = 0; for (int k = 0; k < 3; k++) if (!p.c[k].isC(0)) dg = k; return dg; };
-                if (deg(a) + deg(b) > 2) { r.ok = false; break; }
-                for (int k = 0; k < 3; k++) {
+                auto deg = [](const P &p) { int dg = 0; for (int k = 0; k < 4; k++) if (!p.c[k].isC(0)) dg = k; return dg; };
+                if (deg(a) + deg(b) > 3) { r.ok = false; break; }
+                for (int k = 0; k < 4; k++) {
                     Opnd acc = Opnd::cst(0);
                     for (int u = 0; u <= k; u++) acc = bin(OP_ADD, acc, bin(OP_MUL, a.c[u], b.c[k - u]));
                     r.c[k] = acc;
@@ -2394,9 +2414,9 @@ bool closedFormLoops(Func &f) {
                 a = eval(x->a[0], depth + 1); b = eval(x->a[1], depth + 1);
                 P c = eval(x->a[2], depth + 1);
                 if (!a.ok || !b.ok || !c.ok || a.sc || b.sc) { r.ok = false; break; }
-                auto deg = [](const P &p) { int dg = 0; for (int k = 0; k < 3; k++) if (!p.c[k].isC(0)) dg = k; return dg; };
-                if (deg(a) + deg(b) > 2) { r.ok = false; break; }
-                for (int k = 0; k < 3; k++) {
+                auto deg = [](const P &p) { int dg = 0; for (int k = 0; k < 4; k++) if (!p.c[k].isC(0)) dg = k; return dg; };
+                if (deg(a) + deg(b) > 3) { r.ok = false; break; }
+                for (int k = 0; k < 4; k++) {
                     Opnd acc = c.c[k];
                     for (int u = 0; u <= k; u++) acc = bin(OP_ADD, acc, bin(OP_MUL, a.c[u], b.c[k - u]));
                     r.c[k] = acc;
@@ -2409,7 +2429,7 @@ bool closedFormLoops(Func &f) {
                 a = eval(x->a[0], depth + 1); b = eval(x->a[1], depth + 1);
                 if (!a.ok || !b.ok || b.sc) { r.ok = false; break; }
                 const Opnd sh = Opnd::cst(1u << (x->k & 31));
-                for (int k = 0; k < 3; k++) r.c[k] = bin(OP_ADD, a.c[k], bin(OP_MUL, b.c[k], sh));
+                for (int k = 0; k < 4; k++) r.c[k] = bin(OP_ADD, a.c[k], bin(OP_MUL, b.c[k], sh));
                 r.sc = a.sc; r.s = a.s;
                 break;
             }
@@ -2432,16 +2452,18 @@ bool closedFormLoops(Func &f) {
         }
         if (!ok) continue;
         // Exit values.
-        const Opnd nEff = inclusive ? bin(OP_ADD, n, Opnd::cst(1)) : n;
-        const Opnd guard = bin(OP_LT, i0, nEff);
+        // Up: rounds = ceil((n' - i0) / k) when i0 < n'.  Down: ceil((i0 - m') / k) when m' < i0.
+        const Opnd nEff = down ? (inclusive ? bin(OP_ADD, n, Opnd::cst(0xFFFFFFFFu)) : n)
+                               : (inclusive ? bin(OP_ADD, n, Opnd::cst(1)) : n);
+        const Opnd guard = down ? bin(OP_LT, nEff, i0) : bin(OP_LT, i0, nEff);
         Opnd T;
         {
-            Opnd diff = bin(OP_SUB, nEff, i0);
-            if (kstep > 1) {
-                const Opnd up = bin(OP_ADD, diff, Opnd::cst(kstep - 1));
+            Opnd diff = down ? bin(OP_SUB, i0, nEff) : bin(OP_SUB, nEff, i0);
+            if (kabs > 1) {
+                const Opnd up = bin(OP_ADD, diff, Opnd::cst(kabs - 1));
                 uint32_t lg = 0;
-                while ((1u << lg) < kstep) lg++;
-                diff = pow2 ? bin(OP_SHR, up, Opnd::cst(lg)) : bin(OP_DIV, up, Opnd::cst(kstep));
+                while ((1u << lg) < kabs) lg++;
+                diff = pow2 ? bin(OP_SHR, up, Opnd::cst(lg)) : bin(OP_DIV, up, Opnd::cst(kabs));
             }
             if (guard.isConst) T = guard.c ? diff : Opnd::cst(0);
             else {
@@ -2450,7 +2472,10 @@ bool closedFormLoops(Func &f) {
             }
         }
         bool needS1 = false, needS2 = false;
-        for (const Acc &a : accs) { if (!a.step.c[1].isC(0) || !a.step.c[2].isC(0)) needS1 = true; if (!a.step.c[2].isC(0)) needS2 = true; }
+        for (const Acc &a : accs) {
+            if (!a.step.c[1].isC(0) || !a.step.c[2].isC(0) || !a.step.c[3].isC(0)) needS1 = true;
+            if (!a.step.c[2].isC(0) || !a.step.c[3].isC(0)) needS2 = true;
+        }
         Opnd S1 = Opnd::cst(0), S2 = Opnd::cst(0);
         if (needS1) {
             const Opnd tm1 = bin(OP_ADD, T, Opnd::cst(0xFFFFFFFFu));
@@ -2479,6 +2504,15 @@ bool closedFormLoops(Func &f) {
                              bin(OP_ADD, bin(OP_MUL, bin(OP_MUL, bin(OP_SHL, i0, Opnd::cst(1)), K), S1),
                                  bin(OP_MUL, Opnd::cst(kstep * kstep), S2)));
                 tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[2], q));
+            }
+            if (!a.step.c[3].isC(0)) {
+                // sum (i0 + kj)^3 = T*i0^3 + 3k*i0^2*S1 + 3k^2*i0*S2 + k^3*S3,  S3 = S1^2
+                const Opnd i02 = bin(OP_MUL, i0, i0);
+                Opnd q = bin(OP_MUL, bin(OP_MUL, T, i02), i0);
+                q = bin(OP_ADD, q, bin(OP_MUL, bin(OP_MUL, Opnd::cst(3 * kstep), i02), S1));
+                q = bin(OP_ADD, q, bin(OP_MUL, bin(OP_MUL, Opnd::cst(3 * kstep * kstep), i0), S2));
+                q = bin(OP_ADD, q, bin(OP_MUL, Opnd::cst(kstep * kstep * kstep), bin(OP_MUL, S1, S1)));
+                tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[3], q));
             }
             finals.push_back({a.phi, bin(OP_ADD, a.s0, tot)});
         }

@@ -1,0 +1,26 @@
+; count-down summation loop with cubic terms, form 1_gt (closed form)
+func closed_form_down_1_gt(v0, v1, v2)
+entry:
+  and v3, v0, 4095
+  and v1, v1, 255
+  sub v1, v1, 100
+  const v4, 5
+  mul v6, v2, 2654435761
+  jmp head
+head:
+  lt v7, v1, v3
+  br v7, body, done
+body:
+  mul v8, v3, v3
+  mul v9, v8, v6
+  mul v13, v8, v3
+  add v4, v4, v9
+  add v4, v4, v13
+  shl v10, v3, 3
+  sub v11, v10, v2
+  add v4, v4, v11
+  sub v3, v3, 1
+  jmp head
+done:
+  vstore 1, v3
+  ret v4
