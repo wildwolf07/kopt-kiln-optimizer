@@ -25,10 +25,16 @@ propagation with branch refinement, and bounded trip-count reasoning.
 
 SSA transformations: SCCP, copy/algebraic simplification, linear combinations,
 GVN, load forwarding, DCE, dead stores, CFG cleanup, LICM, induction strength
-reduction, reassociation, safe speculation, fusion and if-conversion.
+reduction, reassociation (sums and min/max chains), Horner-chain splitting,
+counting-select rewriting, safe speculation, fusion and if-conversion. A
+late candidate stage adds load phis (loads below merges become phis of values
+every predecessor already knows) and store selects (a conditional store whose
+old value is known becomes an unconditional store of a select).
 
 Register-form transformations: rotation, ordinary unrolling, peeling,
-threading, invariant-condition unswitching and two complementary counted-loop
+splitting of multi-entry (irreducible) cycles, repeated peeling of short
+constant-trip loop nests ("flatten"), threading, invariant-condition
+unswitching and two complementary counted-loop
 recognizers. One handles rotated latch tests, invariant constant/register steps
 and optional remainder chains; the other handles exact two-block pre-test loops
 with a positive constant step and an explicit signed-underflow guard.
@@ -36,7 +42,8 @@ with a positive constant step and an explicit signed-underflow guard.
 Back end: parallel-copy SSA destruction, unlimited-name and K-name allocation,
 copy-related spill webs, bounded-distance reload reuse, pre/post-allocation
 scheduling, optional legal color spreading, loop-based layout and trace-derived
-layout alternatives. SSA memory facts allow the pre-allocation scheduler to
+layout alternatives, copying of tiny return blocks into jumping predecessors,
+and removal of spill stores that are never reloaded. SSA memory facts allow the pre-allocation scheduler to
 separate proven-disjoint accesses and recognize proven-safe loads.
 
 The input is canonicalized by CFG traversal and first-appearance register
@@ -57,8 +64,8 @@ but not used. Finite self-checking is not a proof of equivalence.
    induction ranges, signed VRP, SCCP, linear combining, CFG cleanup,
    simplification, GVN, simplification, DCE, dead stores, CFG cleanup and LICM.
    Above 20,000 instructions VRP runs only in the first round.
-3. Run strength reduction, reassociation, optional speculation, machine-dependent
-   fusion and if-conversion. Simplify again; combine newly exposed sums and run
+3. Run strength reduction, reassociation, Horner splitting, optional speculation,
+   machine-dependent fusion, if-conversion and counting-select rewriting. Simplify again; combine newly exposed sums and run
    cleanup/fusion once more when useful.
 4. Before destruction, optionally record SSA memory safety/disjointness facts.
    Destroy SSA, optionally pre-schedule on value names, allocate registers,
@@ -68,9 +75,12 @@ but not used. Finite self-checking is not a proof of equivalence.
    two phases include register-form loop transforms followed by recompilation.
    Full-effort runs also perform two rounds of threading/peeling on the best
    distinct candidates. Original compact-color and spill choices remain available.
-6. For full-effort programs, derive chain and hot-block layout alternatives from
-   up to eight good candidates. Measure them with the exact same cycle model.
-7. Sort by training cycles, then check improving candidates on additional inputs
+6. For full-effort programs: a flatten chain (split irreducible cycles, peel by
+   16, thread, recompile; up to four steps on the best three candidates, under a
+   deterministic budget of compiled instructions); a load-phi stage recompiling
+   the best three with load phis, with and without store selects; then chain and
+   hot-block layout alternatives from up to eight good candidates. Measure them with the exact same cycle model.
+7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
 
 Search effort depends on instruction count (full through 1,000, reduced through
@@ -103,9 +113,15 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | LICM | Move invariant pure/safe work to preheaders; roughly O(n·L). | Hoisted operations cannot introduce traps. Divisor nonzero facts must hold on the preheader edge; loads also need valid addresses and no aliasing loop store. |
 | Strength reduction | Replace i*c by a coupled recurrence; O(n) scanning plus CFG work. | The recurrence uses wrapping arithmetic. Save destination IDs before vector insertion so shifted instructions cannot be mistaken for the replacement. |
 | Reassociation | Shorten loop-carried addition chains; graph/SCC work. | Wrapping addition is associative and commutative. |
+| Min/max chains | In a block, a loop-carried chain of select(lt(p,q),q,p) (max) or select(lt(p,q),p,q) (min) becomes one carried step plus a balanced tree of the other inputs. | Signed min/max are associative and commutative and return one of their inputs, so every grouping gives the same bits. Inner nodes must have no other uses. |
+| Horner splitting | A chain h' = h*x + c of n >= 6 steps becomes k=2 chains in x^2 (k=4 in x^4 with 16+ registers), combined at the end. Values it creates are never split again. | Wrapping arithmetic is a commutative ring, so any regrouping of the polynomial is exact. Inner products and sums must be single-use. |
+| Counting selects | select(c, a, a+1) -> a + eq(c,0); select(c, a+1, a) -> a + (c != 0) (c itself when its range is 0..1). | Exact case analysis on c; the test leaves the a chain. |
 | Speculation | Bounded pure-work hoisting across eligible branches. | Extra-path execution must have no observable effect and cannot trap. |
 | Fusion | Select mac/addsh patterns using machine availability/costs; O(n). | Preserve low-32-bit arithmetic; unavailable instructions never reach output. Reduction fusion is a candidate choice. |
 | If-conversion | Inline small safe arms and replace joins with select. | Both evaluated arms must be pure and non-trapping. |
+| Load phis | For a load, walk up single-predecessor blocks to the nearest merge; if every predecessor's chain ends with a known value for the same address and no possibly aliasing store follows it, insert a phi there. | Each path already accessed the word, so no trap is lost. The address is constant or defined in a block strictly dominating the merge, so it names the same word on every edge, back edges included. |
+| Store selects | Hoist a branch arm's leading pure work and stores (pairwise disjoint addresses defined above the branch) and store select(c, new, old). If the arm is then empty, merge its phi inputs into selects and remove it. | The old value must be known at the branch; the skipped path rewrites the same value into an already accessed word. Loads, volatile operations and possibly trapping work stop the hoisted run. |
+| Irreducible splitting | Tarjan SCCs; each extra entry of a multi-entry region gets its own copy of the region within a code budget. | Copying blocks and redirecting edges in register form keeps every execution's instruction sequence. |
 | SSA destruction | Edge parallel copies, critical-edge splitting, temporary cycle breaking. | Read all copy sources before overwriting them. |
 | Unlimited allocation | Interference/coalescing and greedy coloring; O(n+E) plus set work. | Simultaneously live values cannot share a name. On two million edge insertion attempts, use distinct names rather than build an unbounded dense graph. |
 | K-name allocation | Conservative coalescing, ordered-set simplify/select, scratch spills and retry. | Scratch is used only if original accesses are proven below 3072. Copy-related spill webs share a word only when legal. |
@@ -116,6 +132,8 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
 | Header counted groups | Let D=(U-1)s. Guard bound >= INT_MIN+D, then test i < bound-D per group. | Intermediate increments cannot wrap before a skipped test. Each copy writes comparison=1. Keep the final possibly wrapping increment and original scalar exit test. |
 | Unswitching | Clone a loop and dispatch on a register the loop never writes. | Reading the invariant early cannot trap; guarded body operations stay on their selected paths and in order. |
+| Return copying | A jump to a return block of at most 3 instructions takes a copy of it; a branch to two identical such blocks becomes a jump; mov a,s; ret a becomes ret s; unreachable blocks are dropped. | Text copy of the executed instructions minus one jump. |
+| Unread spill stores | Remove stores to scratch spill words that no load reads (K-name allocation only). | All original addresses were proven below 3072, so only spill code touches scratch. |
 | Initial/trace layout | Loop-frequency chains; additional hot-block/edge layouts from fixed traces, O(T+b²). | Entry remains first; explicit targets are remapped. Prediction errors affect speed, not semantics. |
 
 ## 4. The machine
