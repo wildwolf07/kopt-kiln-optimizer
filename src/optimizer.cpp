@@ -4,6 +4,8 @@
 #include <cstdio>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 
 #include "backend.h"
 #include "ir.h"
@@ -65,34 +67,50 @@ struct Flags {
     }
 };
 
+// Per-pass wall time, printed with KOPT_TIMING=1 (developer diagnostics only;
+// never influences the output).
+struct PassTimer {
+    const char *name;
+    std::chrono::steady_clock::time_point t0;
+    explicit PassTimer(const char *n) : name(n), t0(std::chrono::steady_clock::now()) {}
+    ~PassTimer() {
+        static const bool on = getenv("KOPT_TIMING") != nullptr;
+        if (on) {
+            double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            if (ms > 5) fprintf(stderr, "  %-14s %8.1f ms\n", name, ms);
+        }
+    }
+};
+#define TIMED(name, expr) ([&] { PassTimer pt_(name); return (expr); }())
+
 void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
-    simplifyCFG(f);
+    TIMED("simplifyCFG", simplifyCFG(f));
     if (level <= 0) return;
     for (int round = 0; round < 4; round++) {
         bool c = false;
-        c |= sccp(f);
-        c |= simplifyCFG(f);
-        c |= instSimplify(f);
-        c |= gvn(f);
-        c |= instSimplify(f);
-        c |= dce(f);
-        c |= deadStores(f);
-        c |= simplifyCFG(f);
-        if (level >= 2) c |= licm(f);
+        c |= TIMED("sccp", sccp(f));
+        c |= TIMED("simplifyCFG", simplifyCFG(f));
+        c |= TIMED("instSimplify", instSimplify(f));
+        c |= TIMED("gvn", gvn(f));
+        c |= TIMED("instSimplify", instSimplify(f));
+        c |= TIMED("dce", dce(f));
+        c |= TIMED("deadStores", deadStores(f));
+        c |= TIMED("simplifyCFG", simplifyCFG(f));
+        if (level >= 2) c |= TIMED("licm", licm(f));
         if (!c) break;
     }
     if (level >= 2) {
-        if (fl.reassoc && reassociate(f)) {
+        if (fl.reassoc && TIMED("reassociate", reassociate(f))) {
             instSimplify(f);
             gvn(f);
             licm(f);
             dce(f);
         }
-        fuseOps(f, m, fl.fuseReductions);
-        ifConvert(f, m);
-        instSimplify(f);
-        dce(f);
-        simplifyCFG(f);
+        TIMED("fuseOps", fuseOps(f, m, fl.fuseReductions));
+        TIMED("ifConvert", ifConvert(f, m));
+        TIMED("instSimplify", instSimplify(f));
+        TIMED("dce", dce(f));
+        TIMED("simplifyCFG", simplifyCFG(f));
     }
 }
 
@@ -128,7 +146,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     if (scratch) copy = f;
     BackendOptions bo;
     Cand c;
-    c.p = lowerToProgram(f, m, bo);
+    c.p = TIMED("lower", lowerToProgram(f, m, bo));
     if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
     c.what = tag;
     c.flags = fl;
@@ -204,7 +222,9 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         return true;
     };
 
-    const bool small = base.instrCount() <= 20000;
+    // The variant search multiplies compile time; it runs only on programs small
+    // enough to stay far inside the 5 s limit on a slower judging machine.
+    const bool small = base.instrCount() <= 4000;
     std::vector<Cand> cands;
     // Phase 1: the SSA pipeline, in a few flavours.
     {

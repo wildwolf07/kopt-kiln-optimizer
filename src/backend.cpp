@@ -625,10 +625,13 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
 // List scheduling (per block) against the exact issue model.
 // ---------------------------------------------------------------------------
 
-void scheduleProgram(Program &p, const Machine &m) {
-    for (Block &blk : p.blocks) {
+namespace {
+
+// Schedule one block (its last instruction is the terminator and stays last).
+void scheduleBlock(Block &blk, const Machine &m) {
+    {
         const int n = static_cast<int>(blk.ins.size());
-        if (n <= 2) continue;
+        if (n <= 2) return;
         const int body = n - 1;   // the terminator stays last
         std::vector<std::vector<int>> succ(body);
         std::vector<std::vector<std::pair<int, int>>> predLat(body);   // (pred, latency)
@@ -761,9 +764,37 @@ void scheduleProgram(Program &p, const Machine &m) {
             for (int s : succ[best])
                 if (--remaining[s] == 0) avail.push_back(s);
         }
-        if (static_cast<int>(out.size()) != body) continue;   // should not happen; keep original order
+        if (static_cast<int>(out.size()) != body) return;   // should not happen; keep original order
         out.push_back(blk.ins[body]);
         blk.ins.swap(out);
+    }
+}
+
+}  // namespace
+
+void scheduleProgram(Program &p, const Machine &m) {
+    // Long blocks are scheduled in windows so the cost stays linear; windows
+    // keep their order, so every dependence between windows is respected.
+    const int window = 96;
+    for (Block &blk : p.blocks) {
+        const int n = static_cast<int>(blk.ins.size());
+        if (n <= window + 1) {
+            scheduleBlock(blk, m);
+            continue;
+        }
+        const int body = n - 1;
+        for (int start = 0; start < body; start += window) {
+            const int end = std::min(body, start + window);
+            Block w;
+            w.ins.assign(blk.ins.begin() + start, blk.ins.begin() + end);
+            Instr stop;
+            stop.op = OP_RET;
+            stop.nsrc = 1;
+            stop.src[0] = Operand::imm(0);
+            w.ins.push_back(stop);
+            scheduleBlock(w, m);
+            std::copy(w.ins.begin(), w.ins.end() - 1, blk.ins.begin() + start);
+        }
     }
 }
 

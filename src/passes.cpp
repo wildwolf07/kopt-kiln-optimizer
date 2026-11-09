@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "cfg.h"
 
@@ -34,7 +35,8 @@ std::vector<DefSite> defSites(const Func &f) {
 }
 
 const Inst *defInst(const Func &f, const std::vector<DefSite> &ds, Opnd o) {
-    if (o.isConst) return nullptr;
+    // Values created after ds was computed are "unknown" (conservative).
+    if (o.isConst || o.v < 0 || o.v >= static_cast<int>(ds.size())) return nullptr;
     const DefSite &d = ds[o.v];
     if (d.block < 0 || d.isPhi || d.idx < 0) return nullptr;
     const BB &B = f.bb[d.block];
@@ -119,6 +121,7 @@ Range rangeOf(const Func &f, const std::vector<DefSite> &ds, Opnd o, int depth) 
     if (depth <= 0) return full;
     const Inst *x = defInst(f, ds, o);
     if (!x) {
+        if (o.v < 0 || o.v >= static_cast<int>(ds.size())) return full;
         const DefSite &d = ds[o.v];
         if (d.isPhi && d.block >= 0 && depth > 2) {
             const BB &B = f.bb[d.block];
@@ -338,14 +341,17 @@ bool simplifyCFG(Func &f) {
                         for (auto &in : ph.in) if (in.first == e) v = in.second;
                         ph.in.push_back({p, v});
                     }
+                    T.preds.push_back(p);
                 }
-                f.rebuildPreds();
+                // Incremental update (a full rebuild per edge is quadratic on big programs).
+                auto &ep = f.bb[e].preds;
+                ep.erase(std::find(ep.begin(), ep.end(), p));
                 again = true;
             }
         }
         if (again) {
             changed = true;
-            removeUnreachable(f);
+            removeUnreachable(f);   // also rebuilds the predecessor lists exactly
         } else {
             break;
         }
@@ -378,11 +384,11 @@ bool sccp(Func &f) {
                 if (!B.insts[i].a[a].isConst) users[B.insts[i].a[a].v].push_back({b, i});
     }
     std::vector<char> blockExec(nb, 0);
-    std::vector<std::pair<int, int>> execEdges;   // (from, to)
-    auto edgeExec = [&](int from, int to) {
-        for (auto &e : execEdges) if (e.first == from && e.second == to) return true;
-        return false;
+    std::unordered_set<uint64_t> execEdges;   // (from, to) packed
+    auto edgeKey = [](int from, int to) {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(from)) << 32) | static_cast<uint32_t>(to);
     };
+    auto edgeExec = [&](int from, int to) { return execEdges.count(edgeKey(from, to)) != 0; };
     std::vector<std::pair<int, int>> flowWork;
     std::vector<std::pair<int, int>> ssaWork;     // (block, idx)
     auto lat = [&](Opnd o, uint8_t &s, uint32_t &c) {
@@ -460,7 +466,7 @@ bool sccp(Func &f) {
             flowWork.pop_back();
             if (e.first >= 0) {
                 if (edgeExec(e.first, e.second)) continue;
-                execEdges.push_back(e);
+                execEdges.insert(edgeKey(e.first, e.second));
             }
             int b = e.second;
             for (int k = 0; k < static_cast<int>(f.bb[b].phis.size()); k++) evalPhi(b, k);
@@ -1022,6 +1028,7 @@ bool deadStores(Func &f) {
 
 // A preheader for loop header h whose only outside predecessor is `outside`:
 // that block itself if it falls into h alone, otherwise a new block on the edge.
+// Predecessor lists are updated in place (no global rebuild).
 static int makePreheader(Func &f, int h, int outside) {
     int s[2];
     if (f.succs(outside, s) == 1) return outside;
@@ -1034,11 +1041,12 @@ static int makePreheader(Func &f, int h, int outside) {
     P.insts.push_back(j);
     P.freq = f.bb[outside].freq;
     P.loopDepth = f.bb[outside].loopDepth;
+    P.preds.push_back(outside);
     Inst &t = f.bb[outside].term();
     for (int k = 0; k < 2; k++) if (t.tgt[k] == h) t.tgt[k] = p;
     for (Phi &ph : f.bb[h].phis)
         for (auto &in : ph.in) if (in.first == outside) in.first = p;
-    f.rebuildPreds();
+    for (int &q : f.bb[h].preds) if (q == outside) q = p;
     return p;
 }
 
@@ -1051,26 +1059,28 @@ bool licm(Func &f) {
     std::vector<int> order(li.loops.size());
     for (size_t i = 0; i < order.size(); i++) order[i] = static_cast<int>(i);
     std::sort(order.begin(), order.end(), [&](int a, int b) { return li.loops[a].depth > li.loops[b].depth; });
+    std::vector<DefSite> ds = defSites(f);   // may go stale; defInst() then answers "unknown"
+    std::vector<int> defBlock(f.nvals, -1);
+    for (int v = 0; v < f.nvals; v++) defBlock[v] = ds[v].block;
+    // Preheaders created for inner loops belong to the enclosing loops.
+    std::vector<std::vector<int>> extraBlocks(li.loops.size());
     bool changed = false;
     for (int l : order) {
-        const LoopInfo::Loop &L = li.loops[l];
+        const LoopInfo::Loop L = li.loops[l];
         const int h = L.header;
         if (irr[h]) continue;
-        std::vector<char> in(f.bb.size() + 1, 0);
-        for (int b : L.blocks) in[b] = 1;
+        auto inL = [&](int b) { return b >= 0 && li.inLoop(b, l); };
         std::vector<int> outside;
-        for (int p : f.bb[h].preds) if (!in[p]) outside.push_back(p);
+        for (int p : f.bb[h].preds) if (!inL(p)) outside.push_back(p);
         if (outside.size() != 1) continue;
-        std::vector<DefSite> ds = defSites(f);
-        // Stores in the loop decide which loads may move.
+        std::vector<int> blocks = L.blocks;
+        blocks.insert(blocks.end(), extraBlocks[l].begin(), extraBlocks[l].end());
         std::vector<Opnd> loopStores;
-        for (int b : L.blocks)
+        for (int b : blocks)
             for (const Inst &x : f.bb[b].insts)
                 if (x.op == OP_STORE) loopStores.push_back(x.a[0]);
-        std::vector<int> defBlock(f.nvals, -1);
-        for (int v = 0; v < f.nvals; v++) defBlock[v] = ds[v].block;
         auto invariant = [&](Opnd o) {
-            return o.isConst || defBlock[o.v] < 0 || !in[defBlock[o.v]];
+            return o.isConst || defBlock[o.v] < 0 || !inL(defBlock[o.v]);
         };
         auto hoistable = [&](const Inst &x) {
             if (x.dst < 0) return false;
@@ -1078,8 +1088,8 @@ bool licm(Func &f) {
             if (x.op == OP_DIV || x.op == OP_MOD) return rangeOf(f, ds, x.a[1], 8).lo >= 1;
             if (x.op == OP_LOAD) {
                 if (rangeOf(f, ds, x.a[0], 8).hi >= kMemWords) return false;   // may trap
-                for (const Opnd &s : loopStores)
-                    if (!mustDiffer(f, ds, s, x.a[0])) return false;
+                for (const Opnd &st : loopStores)
+                    if (!mustDiffer(f, ds, st, x.a[0])) return false;
                 return true;
             }
             return false;
@@ -1088,8 +1098,7 @@ bool licm(Func &f) {
         bool any = true;
         while (any) {
             any = false;
-            for (int b : d.rpo) {
-                if (!in[b]) continue;
+            for (int b : blocks) {
                 // f.bb may grow (preheader), so never hold a reference across the loop body.
                 for (size_t i = 0; i + 1 < f.bb[b].insts.size();) {
                     Inst x = f.bb[b].insts[i];
@@ -1098,26 +1107,25 @@ bool licm(Func &f) {
                     if (!ok) { i++; continue; }
                     if (pre < 0) {
                         pre = makePreheader(f, h, outside[0]);
-                        in.resize(f.bb.size() + 1, 0);
+                        if (pre >= static_cast<int>(li.innermost.size())) {
+                            // New block: it lies in the loops that enclose L.
+                            li.innermost.push_back(L.parent);
+                            li.depth.push_back(L.parent >= 0 ? li.loops[L.parent].depth : 0);
+                            for (int a = L.parent; a >= 0; a = li.loops[a].parent) extraBlocks[a].push_back(pre);
+                        }
                     }
                     BB &P = f.bb[pre];
                     P.insts.insert(P.insts.end() - 1, x);
                     f.bb[b].insts.erase(f.bb[b].insts.begin() + i);
                     defBlock[x.dst] = pre;
+                    ds[x.dst] = DefSite{pre, static_cast<int>(P.insts.size()) - 2, false};
                     any = true;
                     changed = true;
                 }
             }
         }
-        if (changed) {
-            // Loop structure changed (new preheader); recompute for the next loop.
-            f.rebuildPreds();
-            d = computeDominators(f);
-            li = computeLoops(f, d);
-            irr = irreducibleBlocks(f, d);
-            return changed || licm(f);
-        }
     }
+    if (changed) f.rebuildPreds();
     return changed;
 }
 
@@ -1202,13 +1210,15 @@ bool reassociate(Func &f) {
     }
     bool changed = false;
     for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
-        BB &B = f.bb[b];
-        if (!B.alive) continue;
-        for (size_t i = 0; i < B.insts.size(); i++) {
-            Inst root = B.insts[i];
-            if (root.op != OP_ADD || rec[root.dst] < 0) continue;
+        if (!f.bb[b].alive) continue;
+        // Plan all rewrites of this block against the unchanged block, then apply
+        // them back to front (trees of single-use adds never overlap).
+        std::vector<std::pair<size_t, std::vector<Inst>>> inserts;
+        const size_t nins = f.bb[b].insts.size();
+        for (size_t i = 0; i < nins; i++) {
+            Inst root = f.bb[b].insts[i];
+            if (root.op != OP_ADD || root.dst >= static_cast<int>(rec.size()) || rec[root.dst] < 0) continue;
             const int cyc = rec[root.dst];
-            // Collect leaves through single-use adds of this block that are on the same cycle.
             std::vector<Opnd> leaves;
             std::vector<Opnd> work{root.a[0], root.a[1]};
             int inner = 0;
@@ -1230,12 +1240,11 @@ bool reassociate(Func &f) {
             bool haveConst = false;
             for (Opnd o : leaves) {
                 if (o.isConst) { constSum += o.c; haveConst = true; }
-                else if (rec[o.v] == cyc) carried.push_back(o);
+                else if (o.v < static_cast<int>(rec.size()) && rec[o.v] == cyc) carried.push_back(o);
                 else rest.push_back(o);
             }
             if (carried.size() != 1 || rest.empty()) continue;
             if (haveConst) rest.push_back(Opnd::cst(constSum));
-            // Build the off-cycle part first, right before the root.
             std::vector<Inst> pre;
             Opnd acc = rest[0];
             for (size_t k = 1; k < rest.size(); k++) {
@@ -1248,14 +1257,18 @@ bool reassociate(Func &f) {
                 pre.push_back(a);
                 acc = Opnd::val(a.dst);
             }
-            Inst &r = B.insts[i];
+            Inst &r = f.bb[b].insts[i];
             r.a[0] = carried[0];
             r.a[1] = acc;
-            B.insts.insert(B.insts.begin() + i, pre.begin(), pre.end());
-            i += pre.size();
+            if (!pre.empty()) inserts.push_back({i, pre});
             changed = true;
+        }
+        for (auto it = inserts.rbegin(); it != inserts.rend(); ++it) {
+            auto &ins = f.bb[b].insts;
+            ins.insert(ins.begin() + it->first, it->second.begin(), it->second.end());
+        }
+        if (!inserts.empty()) {
             ds = defSites(f);
-            rec.resize(f.nvals, -1);
             uses.resize(f.nvals, 0);
         }
     }
