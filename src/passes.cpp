@@ -2245,7 +2245,9 @@ bool closedFormLoops(Func &f) {
         const int pre = outside[0];
         const BB &H = f.bb[h];
         if (H.term().op != OP_BR || H.term().a[0].isConst) continue;
-        const int tIn = H.term().tgt[0], ex = H.term().tgt[1];
+        int tIn = H.term().tgt[0], ex = H.term().tgt[1];
+        bool swapped = false;   // true target leaves the loop
+        if (!inL(tIn) && inL(ex)) { std::swap(tIn, ex); swapped = true; }
         if (!inL(tIn) || inL(ex)) continue;
         // Only the header leaves the loop; only the header has phis; all work is pure.
         bool ok = true;
@@ -2264,22 +2266,47 @@ bool closedFormLoops(Func &f) {
         auto invariant = [&](Opnd o) {
             return o.isConst || (o.v < static_cast<int>(ds.size()) && (ds[o.v].block < 0 || !inL(ds[o.v].block)));
         };
-        // Header test: lt(i, n), true stays in the loop.
+        // Header test: lt(i, n) staying on true, or lt(n, i) staying on false
+        // (i <= n, rewritten as i < n + 1 when n + 1 cannot wrap).
         const Inst *cond = defInst(f, ds, f.resolve(H.term().a[0]));
         if (!cond || cond->op != OP_LT || !inL(ds[f.resolve(H.term().a[0]).v].block)) continue;
-        const Opnd iv = f.resolve(cond->a[0]), n = f.resolve(cond->a[1]);
+        auto sRange = [&](Opnd o, int64_t &lo, int64_t &hi) {
+            if (o.isConst) { lo = hi = static_cast<int32_t>(o.c); return true; }
+            if (o.v < static_cast<int>(gVRP.size()) && !gVRP[o.v].empty()) { lo = gVRP[o.v].lo; hi = gVRP[o.v].hi; return true; }
+            Range r = rangeOf(f, ds, o, 6);
+            if (r.hi < 0x80000000ull) { lo = static_cast<int64_t>(r.lo); hi = static_cast<int64_t>(r.hi); return true; }
+            lo = -2147483648ll; hi = 2147483647ll;
+            return true;
+        };
+        Opnd iv, n;
+        bool inclusive = false;
+        if (!swapped) { iv = f.resolve(cond->a[0]); n = f.resolve(cond->a[1]); }
+        else { iv = f.resolve(cond->a[1]); n = f.resolve(cond->a[0]); inclusive = true; }   // leave when n < i
         if (iv.isConst || !invariant(n)) continue;
         const Phi *ip = nullptr;
         for (const Phi &ph : H.phis) if (ph.dst == iv.v) ip = &ph;
         if (!ip || ip->in.size() != 2) continue;
         Opnd i0, inext;
         for (auto &in : ip->in) { if (in.first == pre) i0 = f.resolve(in.second); else inext = f.resolve(in.second); }
+        uint32_t kstep = 0;
         {
             const Inst *st = inext.isConst ? nullptr : defInst(f, ds, inext);
             if (!st || st->op != OP_ADD || !inL(ds[inext.v].block)) continue;
             Opnd a = f.resolve(st->a[0]), b = f.resolve(st->a[1]);
-            if (!((a == iv && b.isC(1)) || (b == iv && a.isC(1)))) continue;
+            if (a == iv && b.isConst) kstep = b.c;
+            else if (b == iv && a.isConst) kstep = a.c;
+            else continue;
+            if (kstep < 1 || kstep > 65536) continue;
         }
+        // Bound n' (the loop runs while i < n'): i + k never wraps when n' + k - 1 <= INT_MAX.
+        int64_t nlo, nhi, ilo, ihi;
+        sRange(n, nlo, nhi);
+        sRange(i0, ilo, ihi);
+        const int64_t nphi = inclusive ? nhi + 1 : nhi;
+        if (nphi + static_cast<int64_t>(kstep) - 1 > 2147483647ll) continue;
+        const bool pow2 = (kstep & (kstep - 1)) == 0;
+        // Non-power-of-two steps divide with the signed div: d + k - 1 must stay below 2^31.
+        if (!pow2 && nphi - ilo + static_cast<int64_t>(kstep) - 1 >= 2147483648ll) continue;
         // Values made in the loop may only be used in the loop (header phis excepted).
         std::vector<char> inLoopVal(f.nvals, 0);
         for (int b : L.blocks) for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inLoopVal[x.dst] = 1;
@@ -2405,10 +2432,17 @@ bool closedFormLoops(Func &f) {
         }
         if (!ok) continue;
         // Exit values.
-        const Opnd guard = bin(OP_LT, i0, n);
+        const Opnd nEff = inclusive ? bin(OP_ADD, n, Opnd::cst(1)) : n;
+        const Opnd guard = bin(OP_LT, i0, nEff);
         Opnd T;
         {
-            Opnd diff = bin(OP_SUB, n, i0);
+            Opnd diff = bin(OP_SUB, nEff, i0);
+            if (kstep > 1) {
+                const Opnd up = bin(OP_ADD, diff, Opnd::cst(kstep - 1));
+                uint32_t lg = 0;
+                while ((1u << lg) < kstep) lg++;
+                diff = pow2 ? bin(OP_SHR, up, Opnd::cst(lg)) : bin(OP_DIV, up, Opnd::cst(kstep));
+            }
             if (guard.isConst) T = guard.c ? diff : Opnd::cst(0);
             else {
                 Inst sl; sl.op = OP_SELECT; sl.dst = f.newVal(); sl.n = 3; sl.a[0] = guard; sl.a[1] = diff; sl.a[2] = Opnd::cst(0);
@@ -2434,12 +2468,16 @@ bool closedFormLoops(Func &f) {
             S2 = bin(OP_MUL, bin(OP_MUL, S1, twoTm1), Opnd::cst(0xAAAAAAABu));   // inverse of 3 mod 2^32
         }
         std::vector<std::pair<Val, Opnd>> finals;
-        finals.push_back({iv.v, bin(OP_ADD, i0, T)});
+        const Opnd K = Opnd::cst(kstep);
+        finals.push_back({iv.v, bin(OP_ADD, i0, bin(OP_MUL, T, K))});
+        // i_j = i0 + k*j:  sum i = T*i0 + k*S1;  sum i^2 = T*i0^2 + 2k*i0*S1 + k^2*S2
         for (const Acc &a : accs) {
             Opnd tot = bin(OP_MUL, a.step.c[0], T);
-            if (!a.step.c[1].isC(0)) tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[1], bin(OP_ADD, bin(OP_MUL, T, i0), S1)));
+            if (!a.step.c[1].isC(0)) tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[1], bin(OP_ADD, bin(OP_MUL, T, i0), bin(OP_MUL, K, S1))));
             if (!a.step.c[2].isC(0)) {
-                Opnd q = bin(OP_ADD, bin(OP_MUL, bin(OP_MUL, T, i0), i0), bin(OP_ADD, bin(OP_MUL, bin(OP_SHL, i0, Opnd::cst(1)), S1), S2));
+                Opnd q = bin(OP_ADD, bin(OP_MUL, bin(OP_MUL, T, i0), i0),
+                             bin(OP_ADD, bin(OP_MUL, bin(OP_MUL, bin(OP_SHL, i0, Opnd::cst(1)), K), S1),
+                                 bin(OP_MUL, Opnd::cst(kstep * kstep), S2)));
                 tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[2], q));
             }
             finals.push_back({a.phi, bin(OP_ADD, a.s0, tot)});
