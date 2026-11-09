@@ -1821,6 +1821,113 @@ bool gvn(Func &f) {
 // Dead code elimination
 // ---------------------------------------------------------------------------
 
+// Loads at merge points: when every predecessor ends with a known value for
+// the load's address (the latest load from, or store to, that same address
+// on the way up its single-predecessor chain, with no store in between that
+// may touch it), the load becomes a phi of those values. Every path has
+// already accessed the same address, so no trap can be lost; the address is
+// defined in a block that strictly dominates the merge (or is a constant), so
+// it names the same word on every incoming edge, including back edges.
+bool loadPhis(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    auto sameAddr = [&](Opnd a, Opnd b) {
+        a = f.resolve(a); b = f.resolve(b);
+        if (a == b) return true;
+        AddrForm x = addrForm(f, ds, a), y = addrForm(f, ds, b);
+        return x.hasBase == y.hasBase && (!x.hasBase || x.base == y.base) && x.off == y.off;
+    };
+    // Value of [A] at the end of block p, or a non-value when unknown.
+    // stopAt: instruction index limit inside p (p's own size for "end").
+    auto availAtEnd = [&](int p, Opnd A, int defBlock, Opnd &out) {
+        int blk = p;
+        int end = static_cast<int>(f.bb[p].insts.size());
+        for (int depth = 0; depth < 8; depth++) {
+            const BB &B = f.bb[blk];
+            for (int i = end - 1; i >= 0; i--) {
+                const Inst &x = B.insts[static_cast<size_t>(i)];
+                if (x.op == OP_STORE || x.op == OP_VSTORE) {
+                    if (x.op == OP_STORE && sameAddr(x.a[0], A)) { out = f.resolve(x.a[1]); return true; }
+                    if (!mustDiffer(f, ds, f.resolve(x.a[0]), A)) return false;
+                } else if (x.op == OP_LOAD && x.dst >= 0 && sameAddr(x.a[0], A)) {
+                    out = Opnd::val(x.dst);
+                    return true;
+                }
+            }
+            if (blk == defBlock || blk == 0) return false;
+            if (B.preds.size() != 1) return false;
+            blk = B.preds[0];
+            end = static_cast<int>(f.bb[blk].insts.size());
+        }
+        return false;
+    };
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        if (!f.bb[b].alive) continue;
+        for (size_t i = 0; i < f.bb[b].insts.size(); i++) {
+            const Inst x = f.bb[b].insts[i];
+            if (x.op != OP_LOAD || x.dst < 0) continue;
+            const Opnd A = f.resolve(x.a[0]);
+            // Walk up from the load to the nearest merge block m. Anything that
+            // already provides the value on the way is GVN's job; a store that
+            // may touch A ends the search.
+            int blk = b;
+            int end = static_cast<int>(i);
+            int m = -1;
+            bool fail = false;
+            for (int depth = 0; depth < 8 && !fail; depth++) {
+                const BB &B = f.bb[blk];
+                for (int k = end - 1; k >= 0 && !fail; k--) {
+                    const Inst &y = B.insts[static_cast<size_t>(k)];
+                    if (y.op == OP_STORE || y.op == OP_VSTORE) {
+                        if (!mustDiffer(f, ds, f.resolve(y.a[0]), A)) fail = true;
+                    } else if (y.op == OP_LOAD && y.dst >= 0 && sameAddr(y.a[0], A)) {
+                        fail = true;   // available already
+                    }
+                    if (!A.isConst && y.dst == A.v) fail = true;   // A defined below the merge
+                }
+                if (fail) break;
+                if (blk == 0) { fail = true; break; }
+                if (B.preds.size() >= 2) { m = blk; break; }
+                if (B.preds.size() != 1) { fail = true; break; }
+                blk = B.preds[0];
+                end = static_cast<int>(f.bb[blk].insts.size());
+            }
+            if (fail || m < 0) continue;
+            int defBlock = -1;
+            if (!A.isConst) {
+                if (A.v >= static_cast<int>(ds.size())) continue;
+                defBlock = ds[A.v].block;
+                if (defBlock == m) continue;
+                if (defBlock >= 0 && !d.dominates(defBlock, m)) continue;
+            }
+            std::vector<std::pair<int, Opnd>> ins;
+            bool ok = true;
+            for (int p : f.bb[m].preds) {
+                Opnd v;
+                if (!f.bb[p].alive || !availAtEnd(p, A, defBlock, v)) { ok = false; break; }
+                if (!v.isConst && v.v == x.dst) { ok = false; break; }
+                ins.push_back({p, v});
+            }
+            if (!ok) continue;
+            Phi ph;
+            ph.dst = f.newVal();
+            ph.in = ins;
+            f.bb[m].phis.push_back(ph);
+            f.replaceAll(x.dst, Opnd::val(ph.dst));
+            Inst &y = f.bb[b].insts[i];
+            y.op = OP_MOV;
+            y.n = 1;
+            y.a[0] = Opnd::val(ph.dst);
+            changed = true;
+            ds = defSites(f);
+        }
+    }
+    return changed;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);

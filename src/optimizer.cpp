@@ -65,9 +65,10 @@ struct Flags {
     bool fuseReductions = false; // mac even on a reduction (fewer registers, longer chain)
     bool speculate = false;      // hoist pure work above branches
     bool strength = true;        // strength-reduce induction-variable multiplies
+    bool loadPhis = false;       // loads at merges -> phis of known values
     std::string name() const {
         return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "") +
-               (speculate ? "-spec" : "") + (strength ? "" : "-nosr");
+               (speculate ? "-spec" : "") + (strength ? "" : "-nosr") + (loadPhis ? "-lp" : "");
     }
 };
 
@@ -113,6 +114,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         c |= TIMED("simplifyCFG", simplifyCFG(f));
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("gvn", gvn(f));
+        if (level >= 2 && fl.loadPhis && passEnabled("loadphis")) c |= TIMED("loadPhis", loadPhis(f));
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("dce", dce(f));
         c |= TIMED("deadStores", deadStores(f));
@@ -445,10 +447,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         std::vector<Cand> p1;
         // reassoc, fuseReductions, speculate
         // reassoc, fuseReductions, speculate, strength
-        static const bool kVariants[][4] = {
-            {true, false, false, true}, {false, false, false, true}, {false, true, false, true},
-            {true, true, false, true}, {true, false, true, true}, {false, true, true, true},
-            {true, false, false, false}, {false, true, false, false},
+        // reassoc, fuseReductions, speculate, strength, loadPhis
+        static const bool kVariants[][5] = {
+            {true, false, false, true, false}, {false, false, false, true, false}, {false, true, false, true, false},
+            {true, true, false, true, false}, {true, false, true, true, false}, {false, true, true, true, false},
+            {true, false, false, false, false}, {false, true, false, false, false},
+            {true, false, false, true, true}, {true, false, true, true, true},
         };
         const int nVariants = effort == 2 ? 8 : (effort == 1 ? 2 : 1);
         for (int v = 0; v < nVariants; v++) {
@@ -457,6 +461,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fl.fuseReductions = kVariants[v][1];
             fl.speculate = kVariants[v][2];
             fl.strength = kVariants[v][3];
+            fl.loadPhis = kVariants[v][4];
             compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1, effort == 0);
         }
         for (Cand &c : p1) quick(c);
@@ -632,6 +637,23 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : flat) cands.push_back(std::move(c));
     }
+    // Load phis on the best programs so far (a separate stage: it helps
+    // mostly after unrolling/flattening has exposed the repeated loads).
+    if (effort == 2 && passEnabled("loadphis")) {
+        std::vector<const Cand *> best;
+        for (const Cand &c : cands) if (c.ok) best.push_back(&c);
+        std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        std::vector<Cand> more;
+        for (size_t i = 0; i < std::min<size_t>(3, best.size()); i++) {
+            Flags fl = best[i]->flags;
+            fl.loadPhis = true;
+            std::vector<Cand> got;
+            compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + "/lp", true, got);
+            for (Cand &c : got) quick(c);
+            for (Cand &c : got) more.push_back(std::move(c));
+        }
+        for (Cand &c : more) cands.push_back(std::move(c));
+    }
     if (effort == 2 && passEnabled("tracelayout")) {
         std::vector<const Cand *> best;
         for (const Cand &c : cands) if (c.ok) best.push_back(&c);
@@ -663,7 +685,8 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // Fastest first; the first one that passes the full check wins.
     std::stable_sort(cands.begin(), cands.end(), [](const Cand &a, const Cand &b) {
         if (a.ok != b.ok) return a.ok;
-        return a.cycles < b.cycles;
+        if (a.cycles != b.cycles) return a.cycles < b.cycles;
+        return a.p.instrCount() < b.p.instrCount();   // tie: smaller code (less icache risk)
     });
     for (const Cand &c : cands) {
         if (!c.ok || c.cycles >= baseCycles) break;

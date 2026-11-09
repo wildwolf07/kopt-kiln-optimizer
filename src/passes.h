@@ -45,6 +45,7 @@ bool simplifyCFG(Func &f);         // fold constant branches, merge blocks, thre
 bool sccp(Func &f);                // sparse conditional constant propagation
 bool instSimplify(Func &f);        // algebraic simplification + copy propagation + trivial phis
 bool gvn(Func &f);                 // dominator-scoped value numbering incl. loads and store forwarding
+bool loadPhis(Func &f);           // loads at merges whose value every predecessor knows -> phi
 bool dce(Func &f);                 // remove values nobody needs (never removes possible traps)
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader

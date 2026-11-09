@@ -1,0 +1,42 @@
+; loads at merges: one path stores through a pointer that may equal the address,
+; another stores the same address, a back edge carries the value around the loop
+func load_phi_alias(v0, v1)
+entry:
+  and v2, v0, 7
+  and v3, v1, 7
+  const v4, 0
+  const v9, 0
+  load v5, v2
+  jmp head
+head:
+  lt v6, v4, 12
+  br v6, body, done
+body:
+  and v7, v4, 3
+  br v7, left, right
+left:
+  store v3, v4
+  jmp merge
+right:
+  add v8, v5, v4
+  store v2, v8
+  jmp merge
+merge:
+  load v10, v2
+  add v9, v9, v10
+  load v11, 5
+  xor v9, v9, v11
+  eq v12, v7, 2
+  br v12, poke, latch
+poke:
+  store 5, v9
+  jmp latch
+latch:
+  add v4, v4, 1
+  jmp head
+done:
+  load v13, v2
+  load v14, 5
+  vstore 1, v14
+  add v15, v9, v13
+  ret v15
