@@ -713,6 +713,27 @@ static void duplicateReturns(Program &p) {
         return t >= 0 && t < nb && !b.ins.empty() && b.ins.size() <= 3 && b.ins.back().op == OP_RET;
     };
     bool changed = false;
+    // A branch whose two targets are identical tiny return blocks is a jump.
+    auto sameInstr = [](const Instr &a, const Instr &b) {
+        if (a.op != b.op || a.nsrc != b.nsrc || a.k != b.k || (hasDest(a.op) && a.dst != b.dst)) return false;
+        for (int s2 = 0; s2 < a.nsrc; s2++) if (a.src[s2] != b.src[s2]) return false;
+        return true;
+    };
+    for (Block &b : p.blocks) {
+        if (b.ins.empty() || b.ins.back().op != OP_BR) continue;
+        Instr &t = b.ins.back();
+        const int x = t.target[0], y = t.target[1];
+        if (x == y || !isTinyRet(x) || !isTinyRet(y)) continue;
+        const auto &bx = p.blocks[static_cast<size_t>(x)].ins, &by = p.blocks[static_cast<size_t>(y)].ins;
+        if (bx.size() != by.size()) continue;
+        bool same = true;
+        for (size_t i = 0; i < bx.size() && same; i++) same = sameInstr(bx[i], by[i]);
+        if (!same) continue;
+        t.op = OP_JMP;
+        t.nsrc = 0;
+        t.target[1] = -1;
+        changed = true;
+    }
     for (int i = 0; i < nb; i++) {
         Block &b = p.blocks[static_cast<size_t>(i)];
         if (b.ins.empty() || b.ins.back().op != OP_JMP) continue;
