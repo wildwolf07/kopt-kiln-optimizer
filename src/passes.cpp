@@ -833,7 +833,15 @@ Range rangeAt(const Func &f, const std::vector<DefSite> &ds, Opnd o, int b,
     std::vector<Fact> facts = chainFacts(f, ds, b, idom);
     if (facts.empty()) return r;
     auto other = [&](Opnd x) -> SR { return fromRange(rangeOf(f, ds, x, 6)); };
-    SR s = refine(fromRange(r), o.v, facts, other);
+    // Start from the signed VRP interval when there is one: a range that
+    // crosses zero is "full" as an unsigned range but still bounded signed.
+    SR base = fromRange(r);
+    if (o.v < static_cast<int>(gVRP.size()) && !gVRP[o.v].empty()) {
+        const SR &g = gVRP[o.v];
+        SR both{std::max(base.lo, g.lo), std::min(base.hi, g.hi)};
+        if (!both.empty()) base = both;
+    }
+    SR s = refine(base, o.v, facts, other);
     if (s.empty()) return r;
     Range rr = toRange(s);
     uint64_t lo = std::max(r.lo, rr.lo), hi = std::min(r.hi, rr.hi);
@@ -2366,7 +2374,7 @@ bool licm(Func &f) {
 // latency gaps (for example the next unrolled iteration's division).
 // ---------------------------------------------------------------------------
 
-bool speculate(Func &f, int budgetPerEdge) {
+bool speculate(Func &f, int budgetPerEdge, bool maskLoads) {
     f.resolveAll();
     f.rebuildPreds();
     std::vector<DefSite> ds = defSites(f);
@@ -2381,22 +2389,47 @@ bool speculate(Func &f, int budgetPerEdge) {
         if (p == s || f.bb[p].term().op != OP_BR) continue;
         int moved = 0;
         bool storeSeen = false;
+        std::vector<Opnd> storeAddrs;   // stores of S passed so far (a load may cross ones it provably misses)
+        bool unknownEffect = false;
         std::vector<char> definedHere(f.nvals, 0);
         for (const Inst &x : S.insts) if (x.dst >= 0) definedHere[x.dst] = 1;
         for (size_t i = 0; i + 1 < S.insts.size() && moved < budgetPerEdge;) {
             Inst x = S.insts[i];
             bool ok = x.dst >= 0;
+            // A load whose address is in memory only on this path (branch facts)
+            // moves up with its address masked to 12 bits: always a valid word,
+            // and the same word whenever the original load would have run.
+            bool mask = false;
             if (ok) {
                 if (isPure(x.op)) ok = true;
                 else if (x.op == OP_DIV || x.op == OP_MOD) ok = rangeOf(f, ds, x.a[1], 8).lo >= 1;
-                else if (x.op == OP_LOAD) ok = !storeSeen && rangeOf(f, ds, x.a[0], 8).hi < kMemWords;
+                else if (x.op == OP_LOAD) {
+                    bool clear = !storeSeen;
+                    if (!clear && maskLoads && !unknownEffect) {
+                        clear = true;
+                        for (Opnd sa : storeAddrs) if (!mustDiffer(f, ds, sa, f.resolve(x.a[0]))) clear = false;
+                    }
+                    ok = clear && rangeOf(f, ds, x.a[0], 8).hi < kMemWords;
+                    if (!ok && maskLoads && clear && !x.a[0].isConst &&
+                        rangeAt(f, ds, x.a[0], s, &d.idom).hi < kMemWords) ok = mask = true;
+                }
                 else ok = false;
             }
             for (int a = 0; ok && a < x.n; a++)
                 if (!x.a[a].isConst && x.a[a].v < static_cast<int>(definedHere.size()) && definedHere[x.a[a].v]) ok = false;
-            if (x.op == OP_STORE) storeSeen = true;
+            if (x.op == OP_STORE) { storeSeen = true; storeAddrs.push_back(f.resolve(x.a[0])); }
+            if (x.op == OP_VSTORE || x.op == OP_VLOAD) { storeSeen = true; unknownEffect = true; }
             if (!ok) { i++; continue; }
             BB &P = f.bb[p];
+            if (mask) {
+                Inst m;
+                m.op = OP_AND; m.dst = f.newVal(); m.n = 2; m.a[0] = x.a[0]; m.a[1] = Opnd::cst(kMemWords - 1);
+                P.insts.insert(P.insts.end() - 1, m);
+                x.a[0] = Opnd::val(m.dst);
+                definedHere.resize(f.nvals, 0);
+                ds.resize(f.nvals);
+                ds[m.dst] = DefSite{p, static_cast<int>(P.insts.size()) - 2, false};
+            }
             P.insts.insert(P.insts.end() - 1, x);
             f.bb[s].insts.erase(f.bb[s].insts.begin() + i);
             definedHere[x.dst] = 0;

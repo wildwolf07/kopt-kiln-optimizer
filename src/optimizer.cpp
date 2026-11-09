@@ -141,7 +141,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             instSimplify(f);
             dce(f);
         }
-        if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width))) {
+        if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width, true))) {
             gvn(f);
             dce(f);
         }

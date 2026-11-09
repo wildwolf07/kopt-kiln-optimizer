@@ -1,0 +1,32 @@
+; loads guarded by range tests: the unguarded address may be negative or huge
+func masked_spec_load(v0, v1)
+entry:
+  lt v2, v0, 4000
+  lt v3, -1, v0
+  and v4, v2, v3
+  const v9, 0
+  br v4, inrange, skip
+inrange:
+  load v5, v0
+  add v9, v9, v5
+  jmp skip
+skip:
+  and v6, v1, 15
+  jmp head
+head:
+  lt v7, v6, 0
+  br v7, done, body
+body:
+  load v8, v6
+  lt v10, v1, v8
+  br v10, shift, done
+shift:
+  add v11, v6, 1
+  store v11, v8
+  add v6, v6, -1
+  add v9, v9, v8
+  jmp head
+done:
+  add v12, v6, 1
+  store v12, v1
+  ret v9
