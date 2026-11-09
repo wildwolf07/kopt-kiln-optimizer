@@ -1928,6 +1928,155 @@ bool loadPhis(Func &f) {
     return changed;
 }
 
+// Conditional stores whose old values are known: in a triangle
+//   P: ... br c, T, J      T: pure work; store a1, x1; ...; jmp J
+// where every ai is defined above P (or constant), the ai are pairwise
+// different words, and the value of each [ai] at the end of P is known
+// (the latest load from or store to ai, with nothing in between that may
+// touch it), T's work moves into P and each store becomes
+//   store ai, select(c, xi, old_i)
+// On the path that skipped T this rewrites a word with its current value; the
+// word was already accessed on that path, so no new trap is possible.
+bool storeSelect(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    auto sameAddr = [&](Opnd a, Opnd b) {
+        a = f.resolve(a); b = f.resolve(b);
+        if (a == b) return true;
+        AddrForm x = addrForm(f, ds, a), y = addrForm(f, ds, b);
+        return x.hasBase == y.hasBase && (!x.hasBase || x.base == y.base) && x.off == y.off;
+    };
+    auto availAtEnd = [&](int p, Opnd A, int defBlock, Opnd &out) {
+        int blk = p;
+        int end = static_cast<int>(f.bb[p].insts.size()) - 1;   // skip the terminator
+        for (int depth = 0; depth < 8; depth++) {
+            const BB &B = f.bb[blk];
+            for (int i = end - 1; i >= 0; i--) {
+                const Inst &x = B.insts[static_cast<size_t>(i)];
+                if (x.op == OP_STORE || x.op == OP_VSTORE) {
+                    if (x.op == OP_STORE && sameAddr(x.a[0], A)) { out = f.resolve(x.a[1]); return true; }
+                    if (!mustDiffer(f, ds, f.resolve(x.a[0]), A)) return false;
+                } else if (x.op == OP_LOAD && x.dst >= 0 && sameAddr(x.a[0], A)) {
+                    out = Opnd::val(x.dst);
+                    return true;
+                }
+            }
+            if (blk == defBlock || blk == 0) return false;
+            if (B.preds.size() != 1) return false;
+            blk = B.preds[0];
+            end = static_cast<int>(f.bb[blk].insts.size());
+        }
+        return false;
+    };
+    bool changed = false;
+    for (int pb = 0; pb < static_cast<int>(f.bb.size()); pb++) {
+        BB &P = f.bb[pb];
+        if (!P.alive || P.term().op != OP_BR || P.term().a[0].isConst) continue;
+        for (int side = 0; side < 2; side++) {
+            const int t = P.term().tgt[side], j = P.term().tgt[1 - side];
+            if (t == j || t == pb || t == 0) continue;
+            const BB &T = f.bb[t];
+            if (!T.alive || T.preds.size() != 1 || !T.phis.empty()) continue;
+            // T's leading run of pure, non-trapping work and plain stores moves
+            // up; the rest of T (if any) stays where it is.
+            std::vector<size_t> stores;
+            bool ok = true;
+            size_t prefix = 0;
+            while (prefix + 1 < T.insts.size()) {
+                const Inst &x = T.insts[prefix];
+                if (x.op == OP_STORE) { stores.push_back(prefix); prefix++; continue; }
+                if (x.op == OP_LOAD || x.op == OP_VLOAD || x.op == OP_VSTORE || x.dst < 0 || mayTrap(f, x)) break;
+                prefix++;
+            }
+            while (!stores.empty() && stores.back() + 1 != prefix) prefix--;   // end the run at its last store
+            const bool whole = prefix + 1 == T.insts.size() && T.term().op == OP_JMP && T.term().tgt[0] == j;
+            if (stores.empty() || stores.size() > 4) continue;
+            std::vector<Opnd> olds;
+            for (size_t si = 0; si < stores.size() && ok; si++) {
+                const Opnd A = f.resolve(T.insts[stores[si]].a[0]);
+                int defBlock = -1;
+                if (!A.isConst) {
+                    defBlock = A.v < static_cast<int>(ds.size()) ? ds[A.v].block : -2;
+                    if (defBlock == -2 || defBlock == t || (defBlock >= 0 && !d.dominates(defBlock, pb))) { ok = false; break; }
+                }
+                for (size_t sj = 0; sj < si; sj++)
+                    if (!mustDiffer(f, ds, f.resolve(T.insts[stores[sj]].a[0]), A)) ok = false;
+                Opnd old;
+                if (ok && !availAtEnd(pb, A, defBlock, old)) ok = false;
+                olds.push_back(old);
+            }
+            if (!ok) continue;
+            const Opnd c = f.resolve(P.term().a[0]);
+            std::vector<Inst> moved;
+            for (size_t i = 0; i < prefix; i++) {
+                const Inst &x = f.bb[t].insts[i];
+                if (x.op != OP_STORE) { moved.push_back(x); continue; }
+                const size_t si = static_cast<size_t>(std::find(stores.begin(), stores.end(), i) - stores.begin());
+                Inst sel;
+                sel.op = OP_SELECT; sel.dst = f.newVal(); sel.n = 3; sel.a[0] = c;
+                sel.a[1] = side == 0 ? f.resolve(x.a[1]) : olds[si];
+                sel.a[2] = side == 0 ? olds[si] : f.resolve(x.a[1]);
+                Inst st = x;
+                st.a[1] = Opnd::val(sel.dst);
+                moved.push_back(sel);
+                moved.push_back(st);
+            }
+            if (!whole) {
+                f.bb[t].insts.erase(f.bb[t].insts.begin(), f.bb[t].insts.begin() + static_cast<long>(prefix));
+                auto &pi = f.bb[pb].insts;
+                pi.insert(pi.end() - 1, moved.begin(), moved.end());
+                changed = true;
+                ds = defSites(f);
+                break;
+            }
+            // J's phis: the inputs from P and T merge into one select in P.
+            for (Phi &ph : f.bb[j].phis) {
+                Opnd fromP, fromT;
+                bool hp = false, ht = false;
+                for (auto &in : ph.in) {
+                    if (in.first == pb) { fromP = f.resolve(in.second); hp = true; }
+                    if (in.first == t) { fromT = f.resolve(in.second); ht = true; }
+                }
+                if (!hp || !ht) continue;
+                Opnd merged = fromP;
+                if (!(fromP == fromT)) {
+                    Inst sel;
+                    sel.op = OP_SELECT; sel.dst = f.newVal(); sel.n = 3; sel.a[0] = c;
+                    sel.a[1] = side == 0 ? fromT : fromP;
+                    sel.a[2] = side == 0 ? fromP : fromT;
+                    moved.push_back(sel);
+                    merged = Opnd::val(sel.dst);
+                }
+                std::vector<std::pair<int, Opnd>> keep;
+                for (auto &in : ph.in) {
+                    if (in.first == t) continue;
+                    if (in.first == pb) keep.push_back({pb, merged});
+                    else keep.push_back(in);
+                }
+                ph.in.swap(keep);
+            }
+            f.bb[t].insts.clear();
+            f.bb[t].phis.clear();
+            f.bb[t].alive = false;
+            auto &pi = f.bb[pb].insts;
+            pi.insert(pi.end() - 1, moved.begin(), moved.end());
+            Inst &term = f.bb[pb].term();
+            term.op = OP_JMP;
+            term.n = 0;
+            term.tgt[0] = j;
+            term.tgt[1] = -1;
+            f.rebuildPreds();
+            changed = true;
+            ds = defSites(f);
+            d = computeDominators(f);
+            break;
+        }
+    }
+    return changed;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);

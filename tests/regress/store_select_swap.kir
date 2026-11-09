@@ -1,0 +1,22 @@
+func sw(v0)
+entry:
+  load v1, 0
+  load v2, 1
+  lt v3, v2, v1
+  br v3, swap, next
+swap:
+  store 0, v2
+  store 1, v1
+  jmp next
+next:
+  load v4, 1
+  load v5, 2
+  lt v6, v5, v4
+  br v6, swap2, done
+swap2:
+  store 1, v5
+  store 2, v4
+  jmp done
+done:
+  load v7, 0
+  ret v7

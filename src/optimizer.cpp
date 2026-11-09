@@ -115,6 +115,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("gvn", gvn(f));
         if (level >= 2 && fl.loadPhis && passEnabled("loadphis")) c |= TIMED("loadPhis", loadPhis(f));
+        if (level >= 2 && fl.loadPhis && passEnabled("storeselect")) c |= TIMED("storeSelect", storeSelect(f));
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("dce", dce(f));
         c |= TIMED("deadStores", deadStores(f));
