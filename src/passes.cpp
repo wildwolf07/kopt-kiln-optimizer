@@ -2692,7 +2692,7 @@ bool popcountLoops(Func &f) {
             if (!form) continue;
         }
         // Accumulators.
-        struct Acc { Val phi; Opnd s0; Opnd k; };
+        struct Acc { Val phi; Opnd s0; Opnd k; bool rev = false; Op comb = OP_ADD; };
         std::vector<Acc> accs;
         Opnd Xc;   // form 3: the counted word (same for every accumulator)
         for (const Phi &ph : H.phis) {
@@ -2700,6 +2700,36 @@ bool popcountLoops(Func &f) {
             Opnd init, next;
             if (!phiIn(ph, init, next)) { ok = false; break; }
             const Inst *ad = def(next);
+            // form 3 also: s' = s | (((X >> i) & 1) << (31 - i))  (or +): bit reversal
+            if (form == 3 && ad && (ad->op == OP_OR || ad->op == OP_ADD)) {
+                Opnd other2;
+                bool okS = true;
+                if (f.resolve(ad->a[0]) == Opnd::val(ph.dst)) other2 = f.resolve(ad->a[1]);
+                else if (f.resolve(ad->a[1]) == Opnd::val(ph.dst)) other2 = f.resolve(ad->a[0]);
+                else okS = false;
+                const Inst *sl = okS ? def(other2) : nullptr;
+                if (sl && sl->op == OP_SHL) {
+                    const Inst *sb = def(sl->a[1]);
+                    const Inst *an = def(sl->a[0]);
+                    if (sb && sb->op == OP_SUB && f.resolve(sb->a[0]).isC(31) && f.resolve(sb->a[1]) == Opnd::val(ctl) &&
+                        an && an->op == OP_AND) {
+                        Opnd sh;
+                        if (f.resolve(an->a[1]).isC(1)) sh = f.resolve(an->a[0]);
+                        else if (f.resolve(an->a[0]).isC(1)) sh = f.resolve(an->a[1]);
+                        const Inst *si = sh.isConst ? nullptr : def(sh);
+                        if (si && si->op == OP_SHR && f.resolve(si->a[1]) == Opnd::val(ctl) && invariant(f.resolve(si->a[0]))) {
+                            const Opnd w = f.resolve(si->a[0]);
+                            if (Xc.isConst && Xc.c == 0 && accs.empty()) Xc = w;
+                            if (accs.empty() || Xc == w) {
+                                Acc ac; ac.phi = ph.dst; ac.s0 = init; ac.k = Opnd::cst(1); ac.rev = true; ac.comb = ad->op;
+                                Xc = w;
+                                accs.push_back(ac);
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
             if (!ad || ad->op != OP_ADD) { ok = false; break; }
             Opnd other;
             if (f.resolve(ad->a[0]) == Opnd::val(ph.dst)) other = f.resolve(ad->a[1]);
@@ -2707,10 +2737,10 @@ bool popcountLoops(Func &f) {
             else { ok = false; break; }
             if (form == 1) {
                 if (!invariant(other)) { ok = false; break; }
-                accs.push_back({ph.dst, init, other});
+                { Acc ac; ac.phi = ph.dst; ac.s0 = init; ac.k = other; accs.push_back(ac); }
             } else if (form == 2) {
                 if (!isOp2(def(other), OP_AND, Opnd::val(ctl), Opnd::cst(1))) { ok = false; break; }
-                accs.push_back({ph.dst, init, Opnd::cst(1)});
+                { Acc ac; ac.phi = ph.dst; ac.s0 = init; ac.k = Opnd::cst(1); accs.push_back(ac); }
             } else {
                 const Inst *an = def(other);
                 if (!an || an->op != OP_AND) { ok = false; break; }
@@ -2723,7 +2753,8 @@ bool popcountLoops(Func &f) {
                 const Opnd w = f.resolve(si->a[0]);
                 if (accs.empty()) Xc = w;
                 else if (!(Xc == w)) { ok = false; break; }
-                accs.push_back({ph.dst, init, Opnd::cst(1)});
+                Acc ac; ac.phi = ph.dst; ac.s0 = init; ac.k = Opnd::cst(1);
+                accs.push_back(ac);
             }
         }
         if (!ok || accs.empty()) continue;
@@ -2738,13 +2769,32 @@ bool popcountLoops(Func &f) {
             emit.push_back(t);
             return Opnd::val(t.dst);
         };
-        Opnd a1 = bin(OP_SUB, X, bin(OP_AND, bin(OP_SHR, X, Opnd::cst(1)), Opnd::cst(0x55555555u)));
-        Opnd b1 = bin(OP_ADD, bin(OP_AND, a1, Opnd::cst(0x33333333u)), bin(OP_AND, bin(OP_SHR, a1, Opnd::cst(2)), Opnd::cst(0x33333333u)));
-        Opnd c1 = bin(OP_AND, bin(OP_ADD, b1, bin(OP_SHR, b1, Opnd::cst(4))), Opnd::cst(0x0F0F0F0Fu));
-        Opnd pop = bin(OP_SHR, bin(OP_MUL, c1, Opnd::cst(0x01010101u)), Opnd::cst(24));
+        bool anyPop = false, anyRev = false;
+        for (const Acc &a : accs) (a.rev ? anyRev : anyPop) = true;
+        Opnd pop, rev;
+        if (anyPop) {
+            Opnd a1 = bin(OP_SUB, X, bin(OP_AND, bin(OP_SHR, X, Opnd::cst(1)), Opnd::cst(0x55555555u)));
+            Opnd b1 = bin(OP_ADD, bin(OP_AND, a1, Opnd::cst(0x33333333u)), bin(OP_AND, bin(OP_SHR, a1, Opnd::cst(2)), Opnd::cst(0x33333333u)));
+            Opnd c1 = bin(OP_AND, bin(OP_ADD, b1, bin(OP_SHR, b1, Opnd::cst(4))), Opnd::cst(0x0F0F0F0Fu));
+            pop = bin(OP_SHR, bin(OP_MUL, c1, Opnd::cst(0x01010101u)), Opnd::cst(24));
+        }
+        if (anyRev) {
+            // Swap adjacent bits, pairs, nibbles, bytes, then halves.
+            static const uint32_t masks[4] = {0x55555555u, 0x33333333u, 0x0F0F0F0Fu, 0x00FF00FFu};
+            Opnd r = X;
+            for (int st = 0; st < 4; st++) {
+                const Opnd sh = Opnd::cst(1u << st);
+                r = bin(OP_OR, bin(OP_AND, bin(OP_SHR, r, sh), Opnd::cst(masks[st])),
+                        bin(OP_SHL, bin(OP_AND, r, Opnd::cst(masks[st])), sh));
+            }
+            rev = bin(OP_OR, bin(OP_SHR, r, Opnd::cst(16)), bin(OP_SHL, r, Opnd::cst(16)));
+        }
         std::vector<std::pair<Val, Opnd>> finals;
         finals.push_back({ctl, form == 3 ? Opnd::cst(32) : Opnd::cst(0)});
-        for (const Acc &a : accs) finals.push_back({a.phi, bin(OP_ADD, a.s0, a.k.isC(1) ? pop : bin(OP_MUL, a.k, pop))});
+        for (const Acc &a : accs) {
+            if (a.rev) finals.push_back({a.phi, bin(a.comb, a.s0, rev)});
+            else finals.push_back({a.phi, bin(OP_ADD, a.s0, a.k.isC(1) ? pop : bin(OP_MUL, a.k, pop))});
+        }
         auto &pi = f.bb[pre].insts;
         pi.insert(pi.end() - 1, emit.begin(), emit.end());
         Inst &pt = f.bb[pre].term();
