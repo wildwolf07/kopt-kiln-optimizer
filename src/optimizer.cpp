@@ -99,6 +99,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
     for (int round = 0; round < 4; round++) {
         bool c = false;
         TIMED("ivranges", (computeIVRanges(f), true));
+        TIMED("vrp", (computeVRP(f), true));
         c |= TIMED("sccp", sccp(f));
         c |= TIMED("combineLinear", combineLinear(f));
         c |= TIMED("simplifyCFG", simplifyCFG(f));

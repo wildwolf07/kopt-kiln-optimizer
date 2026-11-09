@@ -324,12 +324,19 @@ bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int siz
             if (T.insts[k].dst == iv) { addPos = k; break; }
         if (addPos < 0) continue;
         const Inst &add = T.insts[addPos];
-        uint32_t step = 0;
-        if (add.op == OP_ADD && !add.a[0].isConst && add.a[0].v == iv && add.a[1].isConst) step = add.a[1].c;
-        else if (add.op == OP_ADD && !add.a[1].isConst && add.a[1].v == iv && add.a[0].isConst) step = add.a[0].c;
-        if (step == 0 || step > 65536) continue;
-        const uint64_t K = static_cast<uint64_t>(factor - 1) * step;
-        if (K >= 0x7fffffffull) continue;
+        // Step: a positive constant, or a register not written in the loop
+        // (then checked at run time: 0 < s < 2^31 / (factor-1)).
+        Opnd stepOp;
+        bool haveStep = false;
+        if (add.op == OP_ADD && !add.a[0].isConst && add.a[0].v == iv) { stepOp = add.a[1]; haveStep = true; }
+        else if (add.op == OP_ADD && !add.a[1].isConst && add.a[1].v == iv) { stepOp = add.a[0]; haveStep = true; }
+        if (!haveStep || (!stepOp.isConst && stepOp.v == iv)) continue;
+        uint64_t K = 0;
+        if (stepOp.isConst) {
+            if (stepOp.c == 0 || stepOp.c > 65536) continue;
+            K = static_cast<uint64_t>(factor - 1) * stepOp.c;
+            if (K >= 0x7fffffffull) continue;
+        }
         // i written exactly once in the loop; n not written in the loop.
         int ivWrites = 0;
         bool nWritten = false;
@@ -339,6 +346,7 @@ bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int siz
             for (const Inst &x : f.bb[b].insts) {
                 if (x.dst == iv) ivWrites++;
                 if (!n.isConst && x.dst == n.v) nWritten = true;
+                if (!stepOp.isConst && x.dst == stepOp.v) nWritten = true;
             }
         }
         if (ivWrites != 1 || nWritten) continue;
@@ -376,7 +384,21 @@ bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int siz
             Inst j;
             j.op = OP_JMP; j.tgt[0] = D;
             j.tgt[0] = D1;
-            pb.insts = {mk(OP_SUB, m, n, Opnd::cst(static_cast<uint32_t>(K))), mk(OP_LT, f0, Opnd::val(m), n), j};
+            if (stepOp.isConst) {
+                pb.insts = {mk(OP_SUB, m, n, Opnd::cst(static_cast<uint32_t>(K))), mk(OP_LT, f0, Opnd::val(m), n), j};
+            } else {
+                // k = s*(factor-1) is exact when 0 < s < lim; then m = n - k must not wrap.
+                const int k = freshReg(), g1 = freshReg(), g2 = freshReg();
+                const uint32_t lim = static_cast<uint32_t>(0x7fffffffu / static_cast<uint32_t>(factor - 1));
+                pb.insts = {mk(OP_MUL, k, stepOp, Opnd::cst(static_cast<uint32_t>(factor - 1))),
+                            mk(OP_SUB, m, n, Opnd::val(k)),
+                            mk(OP_LT, f0, Opnd::val(m), n),
+                            mk(OP_LT, g1, Opnd::cst(0), stepOp),
+                            mk(OP_LT, g2, stepOp, Opnd::cst(lim)),
+                            mk(OP_AND, g1, Opnd::val(g1), Opnd::val(g2)),
+                            mk(OP_AND, f0, Opnd::val(f0), Opnd::val(g1)),
+                            j};
+            }
             Inst b1;
             b1.op = OP_BR; b1.n = 1; b1.a[0] = Opnd::val(q); b1.tgt[0] = clone[0][h]; b1.tgt[1] = R;
             db.insts = {mk(OP_LT, q, Opnd::val(iv), Opnd::val(m)), mk(OP_AND, q, Opnd::val(q), Opnd::val(f0)), b1};

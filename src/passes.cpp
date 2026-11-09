@@ -2,6 +2,9 @@
 #include "passes.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -300,6 +303,358 @@ void computeIVRanges(Func &f) {
 void clearIVRanges() { gIVRange.clear(); }
 
 // ---------------------------------------------------------------------------
+// Value range propagation (signed intervals) with branch refinement.
+//
+// Every value gets a signed interval [lo, hi] that holds on every execution.
+// Operands are refined by the branch conditions that guard their use: a block
+// reached only through the "true" edge of br (lt a, b) knows a < b. Facts come
+// from chains of single-predecessor blocks, so the guarding edge is always on
+// the way in. Ranges start empty and only grow (union with the old value); a
+// value that keeps growing is widened to the type limit, so the iteration
+// ends. If it does not settle within the iteration cap, nothing is used.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr int64_t kSMin = -2147483648LL, kSMax = 2147483647LL;
+
+struct SR {
+    int64_t lo = 1, hi = 0;   // lo > hi: empty
+    bool empty() const { return lo > hi; }
+    static SR full() { return SR{kSMin, kSMax}; }
+    static SR pt(int64_t v) { return SR{v, v}; }
+};
+
+SR sOfConst(uint32_t c) { return SR::pt(static_cast<int32_t>(c)); }
+
+SR clampSR(int64_t lo, int64_t hi) {
+    if (lo < kSMin || hi > kSMax) return SR::full();
+    return SR{lo, hi};
+}
+
+SR unionSR(SR a, SR b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    return SR{std::min(a.lo, b.lo), std::max(a.hi, b.hi)};
+}
+
+SR fromRange(const Range &r) {
+    if (r.hi <= static_cast<uint64_t>(kSMax)) return SR{static_cast<int64_t>(r.lo), static_cast<int64_t>(r.hi)};
+    if (r.lo >= 0x80000000ull) return SR{static_cast<int64_t>(r.lo) - 4294967296LL, static_cast<int64_t>(r.hi) - 4294967296LL};
+    return SR::full();
+}
+
+Range toRange(const SR &s) {
+    if (s.empty()) return Range();
+    if (s.lo >= 0) return Range{static_cast<uint64_t>(s.lo), static_cast<uint64_t>(s.hi)};
+    if (s.hi < 0) return Range{static_cast<uint64_t>(s.lo + 4294967296LL), static_cast<uint64_t>(s.hi + 4294967296LL)};
+    return Range();
+}
+
+// A fact "v rel other" known at some point. rel: 0 <, 1 <=, 2 >, 3 >=, 4 ==, 5 !=
+struct Fact { Val v; int rel; Opnd other; };
+
+void factsFromCond(const Func &f, const std::vector<DefSite> &ds, Opnd c, bool truth, std::vector<Fact> &out, int depth) {
+    if (c.isConst || depth > 3) return;
+    out.push_back({c.v, truth ? 5 : 4, Opnd::cst(0)});
+    const Inst *d = defInst(f, ds, c);
+    if (!d) return;
+    if (d->op == OP_LT) {
+        Opnd a = d->a[0], b = d->a[1];
+        if (!a.isConst) out.push_back({a.v, truth ? 0 : 3, b});
+        if (!b.isConst) out.push_back({b.v, truth ? 2 : 1, a});
+    } else if (d->op == OP_EQ) {
+        Opnd a = d->a[0], b = d->a[1];
+        // eq(x, 0) where x is a condition: the negation of x.
+        if (b.isC(0) && !a.isConst) {
+            const Inst *xa = defInst(f, ds, a);
+            if (xa && (xa->op == OP_LT || xa->op == OP_EQ)) factsFromCond(f, ds, a, !truth, out, depth + 1);
+        }
+        if (!a.isConst) out.push_back({a.v, truth ? 4 : 5, b});
+        if (!b.isConst) out.push_back({b.v, truth ? 4 : 5, a});
+    }
+}
+
+// Facts that hold on entry to block b: walk the chain of single predecessors.
+std::vector<Fact> chainFacts(const Func &f, const std::vector<DefSite> &ds, int b) {
+    std::vector<Fact> out;
+    for (int depth = 0; depth < 24 && b > 0; depth++) {
+        const BB &B = f.bb[b];
+        if (B.preds.size() != 1) break;
+        const int p = B.preds[0];
+        const Inst &t = f.bb[p].term();
+        if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, out, 0);
+        b = p;
+    }
+    return out;
+}
+
+SR refine(SR r, Val v, const std::vector<Fact> &facts, const std::function<SR(Opnd)> &rangeOfOther) {
+    if (r.empty()) return r;
+    for (const Fact &fa : facts) {
+        if (fa.v != v) continue;
+        SR o = rangeOfOther(fa.other);
+        if (o.empty()) continue;
+        switch (fa.rel) {
+        case 0: r.hi = std::min(r.hi, o.hi - 1); break;
+        case 1: r.hi = std::min(r.hi, o.hi); break;
+        case 2: r.lo = std::max(r.lo, o.lo + 1); break;
+        case 3: r.lo = std::max(r.lo, o.lo); break;
+        case 4: r.lo = std::max(r.lo, o.lo); r.hi = std::min(r.hi, o.hi); break;
+        case 5:
+            if (o.lo == o.hi) {
+                if (r.lo == o.lo) r.lo++;
+                if (r.hi == o.lo) r.hi--;
+            }
+            break;
+        }
+        if (r.empty()) return r;
+    }
+    return r;
+}
+
+SR transfer(const Inst &x, const std::function<SR(int)> &R) {
+    auto A = [&](int i) { return R(i); };
+    switch (x.op) {
+    case OP_MOV: return A(0);
+    case OP_ADD: { SR a = A(0), b = A(1); return clampSR(a.lo + b.lo, a.hi + b.hi); }
+    case OP_SUB: { SR a = A(0), b = A(1); return clampSR(a.lo - b.hi, a.hi - b.lo); }
+    case OP_MUL: case OP_MAC: {
+        SR a = A(0), b = A(1);
+        if (a.lo < -65536 || a.hi > 65536 || b.lo < -65536 || b.hi > 65536) return SR::full();
+        int64_t p[4] = {a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi};
+        SR m{*std::min_element(p, p + 4), *std::max_element(p, p + 4)};
+        if (x.op == OP_MUL) return clampSR(m.lo, m.hi);
+        SR c = A(2);
+        return clampSR(m.lo + c.lo, m.hi + c.hi);
+    }
+    case OP_ADDSH: {
+        SR a = A(0), b = A(1);
+        if (b.lo < -65536 || b.hi > 65536 || x.k > 15) return SR::full();
+        return clampSR(a.lo + (b.lo << x.k), a.hi + (b.hi << x.k));
+    }
+    case OP_AND: {
+        SR a = A(0), b = A(1);
+        if (a.lo >= 0 && b.lo >= 0) return SR{0, std::min(a.hi, b.hi)};
+        if (a.lo >= 0) return SR{0, a.hi};
+        if (b.lo >= 0) return SR{0, b.hi};
+        return SR::full();
+    }
+    case OP_OR: case OP_XOR: {
+        SR a = A(0), b = A(1);
+        if (a.lo >= 0 && b.lo >= 0) return SR{0, static_cast<int64_t>(maskUpTo(static_cast<uint64_t>(std::max(a.hi, b.hi))))};
+        return SR::full();
+    }
+    case OP_SHL: {
+        SR a = A(0), b = A(1);
+        if (b.lo != b.hi) return SR::full();
+        int k = static_cast<int>(b.lo & 31);
+        if (a.lo < -(1LL << 30) || a.hi > (1LL << 30)) return SR::full();
+        return clampSR(a.lo * (1LL << k), a.hi * (1LL << k));
+    }
+    case OP_SHR: {
+        SR a = A(0), b = A(1);
+        if (b.lo == b.hi) {
+            int k = static_cast<int>(b.lo & 31);
+            if (a.lo >= 0) return SR{a.lo >> k, a.hi >> k};
+            if (k >= 1) return SR{0, static_cast<int64_t>(0xFFFFFFFFull >> k)};
+            return a;
+        }
+        if (a.lo >= 0) return SR{0, a.hi};
+        return SR::full();
+    }
+    case OP_LT: case OP_EQ: return SR{0, 1};
+    case OP_SELECT: return unionSR(A(1), A(2));
+    case OP_DIV: {
+        SR a = A(0), b = A(1);
+        if (b.lo >= 1) {
+            int64_t c1 = b.lo, c2 = b.hi;
+            int64_t q[4] = {a.lo / c1, a.lo / c2, a.hi / c1, a.hi / c2};
+            return SR{*std::min_element(q, q + 4), *std::max_element(q, q + 4)};
+        }
+        return SR::full();
+    }
+    case OP_MOD: {
+        SR a = A(0), b = A(1);
+        int64_t m = std::max(std::llabs(b.lo), std::llabs(b.hi));
+        if (b.lo <= 0 && b.hi >= 0 && m == 0) return SR::full();
+        if (m == 0 || m > kSMax) return SR::full();
+        if (a.lo >= 0) return SR{0, std::min(a.hi, m - 1)};
+        if (a.hi <= 0) return SR{std::max(a.lo, -(m - 1)), 0};
+        return SR{-(m - 1), m - 1};
+    }
+    default:
+        return SR::full();
+    }
+}
+
+std::vector<SR> gVRP;   // signed ranges from the last computeVRP (by value)
+
+}  // namespace
+
+void computeVRP(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    gVRP.clear();
+    DomInfo d = computeDominators(f);
+    std::vector<DefSite> ds = defSites(f);
+    const int nv = f.nvals;
+    std::vector<SR> sr(nv);
+    std::vector<int> grow(nv, 0);
+    for (Val p : f.params) sr[p] = SR::full();
+    const int nb = static_cast<int>(f.bb.size());
+    std::vector<std::vector<Fact>> facts(nb);
+    for (int b : d.rpo) facts[b] = chainFacts(f, ds, b);
+    auto valRange = [&](Opnd o) -> SR { return o.isConst ? sOfConst(o.c) : sr[o.v]; };
+    auto refinedIn = [&](Opnd o, int block) -> SR {
+        if (o.isConst) return sOfConst(o.c);
+        return refine(sr[o.v], o.v, facts[block], valRange);
+    };
+    // Widening thresholds: constants the program compares against (and +-1),
+    // so a counter bounded by "i < 8" widens to 8 rather than to 2^31-1.
+    std::vector<int64_t> thr;
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Inst &x : B.insts)
+            if (x.op == OP_LT || x.op == OP_EQ)
+                for (int a = 0; a < x.n; a++)
+                    if (x.a[a].isConst) {
+                        int64_t c = static_cast<int32_t>(x.a[a].c);
+                        for (int64_t dlt = -1; dlt <= 1; dlt++) thr.push_back(c + dlt);
+                    }
+    }
+    std::sort(thr.begin(), thr.end());
+    thr.erase(std::unique(thr.begin(), thr.end()), thr.end());
+    bool settled = false;
+    for (int iter = 0; iter < 60 && !settled; iter++) {
+        settled = true;
+        for (int b : d.rpo) {
+            BB &B = f.bb[b];
+            auto update = [&](Val v, SR nr) {
+                SR old = sr[v];
+                SR u = unionSR(old, nr);
+                if (u.lo == old.lo && u.hi == old.hi && !old.empty()) return;
+                if (old.empty() && u.empty()) return;
+                if (!old.empty() && ++grow[v] > 4) {
+                    const bool far = grow[v] > 12;   // thresholds first, then the limits
+                    if (u.lo < old.lo) {
+                        int64_t t = kSMin;
+                        if (!far) for (auto it = thr.rbegin(); it != thr.rend(); ++it) if (*it <= u.lo) { t = *it; break; }
+                        u.lo = t;
+                    }
+                    if (u.hi > old.hi) {
+                        int64_t t = kSMax;
+                        if (!far) for (int64_t c : thr) if (c >= u.hi) { t = c; break; }
+                        u.hi = t;
+                    }
+                }
+                sr[v] = u;
+                settled = false;
+            };
+            for (Phi &ph : B.phis) {
+                SR acc;
+                for (auto &in : ph.in) {
+                    const int p = in.first;
+                    if (!d.reachable(p)) continue;
+                    std::vector<Fact> ef = facts[p];
+                    const Inst &t = f.bb[p].term();
+                    if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
+                    Opnd o = in.second;
+                    SR r = o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange);
+                    acc = unionSR(acc, r);
+                }
+                update(ph.dst, acc);
+            }
+            for (Inst &x : B.insts) {
+                if (x.dst < 0) continue;
+                bool anyEmpty = false;
+                std::vector<SR> ops(x.n);
+                for (int a = 0; a < x.n; a++) {
+                    ops[a] = refinedIn(x.a[a], b);
+                    if (ops[a].empty()) anyEmpty = true;
+                }
+                if (anyEmpty && x.op != OP_LOAD && x.op != OP_VLOAD) continue;   // not reached yet
+                SR nr = (x.op == OP_LOAD || x.op == OP_VLOAD) ? SR::full() : transfer(x, [&](int i) { return ops[i]; });
+                update(x.dst, nr);
+            }
+        }
+    }
+    // Narrowing: from a sound over-approximation, x := x intersect F(x) stays
+    // sound and recovers the bounds that widening threw away (i < 8 => i <= 8).
+    if (settled) {
+        for (int pass = 0; pass < 4; pass++) {
+            for (int b : d.rpo) {
+                BB &B = f.bb[b];
+                auto narrow = [&](Val v, SR nr) {
+                    if (nr.empty() || sr[v].empty()) return;
+                    SR x{std::max(sr[v].lo, nr.lo), std::min(sr[v].hi, nr.hi)};
+                    if (!x.empty()) sr[v] = x;
+                };
+                for (Phi &ph : B.phis) {
+                    SR acc;
+                    for (auto &in : ph.in) {
+                        const int p = in.first;
+                        if (!d.reachable(p)) continue;
+                        std::vector<Fact> ef = facts[p];
+                        const Inst &t = f.bb[p].term();
+                        if (t.op == OP_BR && t.tgt[0] != t.tgt[1]) factsFromCond(f, ds, t.a[0], t.tgt[0] == b, ef, 0);
+                        Opnd o = in.second;
+                        acc = unionSR(acc, o.isConst ? sOfConst(o.c) : refine(sr[o.v], o.v, ef, valRange));
+                    }
+                    narrow(ph.dst, acc);
+                }
+                for (Inst &x : B.insts) {
+                    if (x.dst < 0 || x.op == OP_LOAD || x.op == OP_VLOAD) continue;
+                    std::vector<SR> ops(x.n);
+                    bool anyEmpty = false;
+                    for (int a = 0; a < x.n; a++) {
+                        ops[a] = refinedIn(x.a[a], b);
+                        if (ops[a].empty()) anyEmpty = true;
+                    }
+                    if (anyEmpty) continue;
+                    narrow(x.dst, transfer(x, [&](int i) { return ops[i]; }));
+                }
+            }
+        }
+    }
+    if (getenv("KOPT_DEBUGRANGE")) {
+        fprintf(stderr, "VRP settled=%d\n%s", settled ? 1 : 0, dumpFunc(f).c_str());
+        for (int v = 0; v < nv; v++)
+            if (!sr[v].empty()) fprintf(stderr, "  %%%d [%lld,%lld] grow=%d\n", v, (long long)sr[v].lo, (long long)sr[v].hi, grow[v]);
+    }
+    if (!settled) return;   // no fixpoint: use nothing
+    gVRP = sr;
+    if (static_cast<int>(gIVRange.size()) < nv) gIVRange.resize(nv, Range());
+    for (int v = 0; v < nv; v++) {
+        if (sr[v].empty()) continue;
+        Range r = toRange(sr[v]);
+        Range &g = gIVRange[v];
+        g.lo = std::max(g.lo, r.lo);
+        g.hi = std::min(g.hi, r.hi);
+        if (g.lo > g.hi) g = r;   // cannot happen when both are sound; stay safe
+    }
+}
+
+namespace {
+
+// Range of an operand where it is used in block b: its global range refined by
+// the branch facts that guard b.
+Range rangeAt(const Func &f, const std::vector<DefSite> &ds, Opnd o, int b) {
+    Range r = rangeOf(f, ds, o, 8);
+    if (o.isConst || b < 0) return r;
+    std::vector<Fact> facts = chainFacts(f, ds, b);
+    if (facts.empty()) return r;
+    auto other = [&](Opnd x) -> SR { return fromRange(rangeOf(f, ds, x, 6)); };
+    SR s = refine(fromRange(r), o.v, facts, other);
+    if (s.empty()) return r;
+    Range rr = toRange(s);
+    uint64_t lo = std::max(r.lo, rr.lo), hi = std::min(r.hi, rr.hi);
+    return lo <= hi ? Range{lo, hi} : r;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
 // Linear combination: a tree of add/sub/mul-by-constant/shl-by-constant whose
 // inner nodes are used only inside the tree is a sum of (coefficient x value)
 // terms plus a constant. Equal values are merged (x*8 + x*10 + x*3 + x*16 =
@@ -478,10 +833,19 @@ bool strengthReduce(Func &f) {
 bool memoryAccessesBelow(Func &f, uint32_t limit) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);
-    for (BB &B : f.bb) {
+    f.rebuildPreds();
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        BB &B = f.bb[b];
         if (!B.alive) continue;
         for (Inst &x : B.insts)
-            if ((x.op == OP_LOAD || x.op == OP_STORE) && rangeOf(f, ds, x.a[0], 10).hi >= limit) return false;
+            if ((x.op == OP_LOAD || x.op == OP_STORE) && rangeAt(f, ds, x.a[0], b).hi >= limit) {
+                if (getenv("KOPT_DEBUGRANGE")) {
+                    Range r = rangeAt(f, ds, x.a[0], b);
+                    fprintf(stderr, "unbounded %s in B%d addr %%%d range [%llu,%llu]\n", opName(x.op), b, x.a[0].isConst ? -1 : x.a[0].v,
+                            (unsigned long long)r.lo, (unsigned long long)r.hi);
+                }
+                return false;
+            }
     }
     return true;
 }
@@ -493,12 +857,14 @@ bool addressInRange(Func &f, Opnd addr) {
     return rangeOf(f, ds, addr, 8).hi < kMemWords;
 }
 
-static bool mayTrapWith(const Func &f, const std::vector<DefSite> &ds, const Inst &x) {
+// Block-aware: the operand ranges are refined by the branches guarding block b
+// (b < 0: no refinement). Only for decisions about the instruction where it is.
+static bool mayTrapWith(const Func &f, const std::vector<DefSite> &ds, const Inst &x, int b = -1) {
     switch (x.op) {
     case OP_DIV: case OP_MOD:
-        return rangeOf(f, ds, x.a[1], 8).lo == 0;
+        return rangeAt(f, ds, x.a[1], b).lo == 0;
     case OP_LOAD: case OP_STORE:
-        return rangeOf(f, ds, x.a[0], 8).hi >= kMemWords;
+        return rangeAt(f, ds, x.a[0], b).hi >= kMemWords;
     case OP_TRAP:
         return true;
     default:
@@ -1192,10 +1558,12 @@ bool dce(Func &f) {
     auto markOp = [&](Opnd o) {
         if (!o.isConst && !live[o.v]) { live[o.v] = 1; work.push_back(o.v); }
     };
+    f.rebuildPreds();
     for (BB &B : f.bb) {
         if (!B.alive) continue;
+        const int bi = static_cast<int>(&B - &f.bb[0]);
         for (Inst &x : B.insts) {
-            bool root = x.dst < 0 || x.op == OP_VLOAD || mayTrapWith(f, ds, x);
+            bool root = x.dst < 0 || x.op == OP_VLOAD || mayTrapWith(f, ds, x, bi);
             if (root) {
                 if (x.dst >= 0 && !live[x.dst]) live[x.dst] = 1;   // keep the instruction itself
                 for (int a = 0; a < x.n; a++) markOp(x.a[a]);
@@ -1239,8 +1607,10 @@ bool deadStores(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);
     bool changed = false;
+    f.rebuildPreds();
     for (BB &B : f.bb) {
         if (!B.alive) continue;
+        const int bi = static_cast<int>(&B - &f.bb[0]);
         std::vector<Opnd> overwritten;   // addresses stored later in this block, unobserved since
         std::vector<char> kill(B.insts.size(), 0);
         for (int i = static_cast<int>(B.insts.size()) - 1; i >= 0; i--) {
@@ -1248,7 +1618,7 @@ bool deadStores(Func &f) {
             if (x.op == OP_STORE) {
                 // Only a store that cannot trap is a guaranteed overwrite; a store
                 // that may trap is a point where earlier stores become visible.
-                bool trapping = mayTrapWith(f, ds, x);
+                bool trapping = mayTrapWith(f, ds, x, bi);
                 bool dead = false;
                 if (!trapping)
                     for (const Opnd &o : overwritten) if (o == x.a[0]) dead = true;
@@ -1262,10 +1632,10 @@ bool deadStores(Func &f) {
                 for (const Opnd &o : overwritten)
                     if (mustDiffer(f, ds, o, x.a[0])) keep.push_back(o);
                 overwritten.swap(keep);
-                if (mayTrapWith(f, ds, x)) overwritten.clear();
+                if (mayTrapWith(f, ds, x, bi)) overwritten.clear();
                 continue;
             }
-            if (mayTrapWith(f, ds, x)) overwritten.clear();
+            if (mayTrapWith(f, ds, x, bi)) overwritten.clear();
         }
         if (changed) {
             std::vector<Inst> out;

@@ -26,6 +26,8 @@ bool memoryAccessesBelow(Func &f, uint32_t limit);
 // Compute ranges of loop induction variables (used by every range query).
 void computeIVRanges(Func &f);
 void clearIVRanges();
+// Signed value ranges with branch refinement (feeds every range query).
+void computeVRP(Func &f);
 bool combineLinear(Func &f);      // merge like terms of add/sub/mul-by-constant trees
 bool strengthReduce(Func &f);    // i*c in a loop -> extra induction variable
 
