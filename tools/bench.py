@@ -123,6 +123,8 @@ def main():
     ap.add_argument("--jobs", type=int, default=os.cpu_count())
     ap.add_argument("--dir", default=None, help="folder of .kir/.in files (default: kit bench/)")
     ap.add_argument("-v", "--verbose", action="store_true", help="print every row")
+    ap.add_argument("--save", default=None, help="write per-program cycles to this JSON file")
+    ap.add_argument("--compare", default=None, help="show differences against a saved JSON file")
     a = ap.parse_args()
 
     bench = a.dir or os.path.join(KIT, "bench")
@@ -158,6 +160,27 @@ def main():
         s1 = sum(r["c1"] for r in rs)
         geo = math.exp(sum(math.log(r["c0"] / max(1, r["c1"])) for r in rs) / len(rs))
         print("%-14s %5d %12d %12d %8.3f %8.3f" % (m, len(rs), s0, s1, s0 / max(1, s1), geo))
+    if a.save:
+        import json
+        with open(a.save, "w") as f:
+            json.dump({"%s|%s" % (r["name"], r["machine"]): r["c1"] for r in good}, f, indent=0, sort_keys=True)
+    if a.compare:
+        import json
+        with open(a.compare) as f:
+            old = json.load(f)
+        diffs = []
+        for r in good:
+            k = "%s|%s" % (r["name"], r["machine"])
+            if k in old and old[k] != r["c1"]:
+                diffs.append((r["c1"] - old[k], k, old[k], r["c1"]))
+        diffs.sort()
+        print("\nbest improvements:")
+        for d in diffs[:8]:
+            print("  %-36s %7d -> %7d (%+d)" % (d[1], d[2], d[3], d[0]))
+        print("worst regressions:")
+        for d in diffs[::-1][:8]:
+            if d[0] > 0:
+                print("  %-36s %7d -> %7d (%+d)" % (d[1], d[2], d[3], d[0]))
     slow = max((r.get("kopt_s", 0) for r in rows), default=0)
     print("\n%d/%d passed, %d failed, slowest kopt %.2fs, wall %.1fs" % (
         len(good), len(rows), len(fails), slow, time.time() - t0))

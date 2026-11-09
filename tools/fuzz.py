@@ -57,8 +57,11 @@ class Gen(object):
     def __init__(self, rng, mc):
         self.rng = rng
         self.mc = mc
-        self.nregs = rng.randint(3, 14)
+        self.nregs = rng.randint(3, 20)
         self.nparams = rng.randint(0, min(4, self.nregs))
+        # none: no memory at all; bounded: every address provably < 3072 (so kopt
+        # may use the scratch region for spills); any: anything, including traps.
+        self.memmode = rng.choice(["none", "bounded", "any", "any"])
 
     def reg(self):
         return "v%d" % self.rng.randrange(self.nregs)
@@ -70,6 +73,10 @@ class Gen(object):
 
     def addr(self):
         r = self.rng.random()
+        if self.memmode == "bounded":
+            if r < 0.7:
+                return None, "and %s, %s, %d" % ("{t}", self.reg(), self.rng.choice([7, 15, 63, 255, 2047]))
+            return str(self.rng.choice([0, 1, 5, 64, 1000, 3071])), None
         if r < 0.45:
             return None, "and %s, %s, %d" % ("{t}", self.reg(), self.rng.choice([7, 15, 63, 255]))
         if r < 0.6:
@@ -93,14 +100,14 @@ class Gen(object):
         elif r < 0.63:
             out.append("%s %s, %s, %s" % (rng.choice(["div", "mod"]), d, self.src(),
                                           rng.choice([self.src(), self.src(), "1", "-1", "7", "8", "0"])))
-        elif r < 0.73:
+        elif r < 0.73 and self.memmode != "none":
             a, pre = self.addr()
             if pre:
                 t = self.reg()
                 out.append(pre.replace("{t}", t))
                 a = t
             out.append("load %s, %s" % (d, a))
-        elif r < 0.82:
+        elif r < 0.82 and self.memmode != "none":
             a, pre = self.addr()
             if pre:
                 t = self.reg()

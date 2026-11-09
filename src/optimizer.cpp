@@ -57,7 +57,15 @@ bool usesUnsupported(const Program &p, const Machine &m) {
     return false;
 }
 
-void runPipeline(Func &f, const Machine &m, int level) {
+struct Flags {
+    bool reassoc = true;         // shorten loop-carried add chains
+    bool fuseReductions = false; // mac even on a reduction (fewer registers, longer chain)
+    std::string name() const {
+        return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "");
+    }
+};
+
+void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
     simplifyCFG(f);
     if (level <= 0) return;
     for (int round = 0; round < 4; round++) {
@@ -74,7 +82,13 @@ void runPipeline(Func &f, const Machine &m, int level) {
         if (!c) break;
     }
     if (level >= 2) {
-        fuseOps(f, m);
+        if (fl.reassoc && reassociate(f)) {
+            instSimplify(f);
+            gvn(f);
+            licm(f);
+            dce(f);
+        }
+        fuseOps(f, m, fl.fuseReductions);
         ifConvert(f, m);
         instSimplify(f);
         dce(f);
@@ -82,44 +96,53 @@ void runPipeline(Func &f, const Machine &m, int level) {
     }
 }
 
-struct Checked {
-    bool ok = false;
-    uint64_t cycles = 0;   // summed over the timing sample
-    std::string why;
-};
-
-// Run the original and the candidate on the same generated inputs.
-Checked check(const SimProgram &orig, const std::vector<RunResult> &origRuns, const Program &cand,
-              const std::vector<Input> &inputs, const Machine &m, size_t timingSample) {
-    Checked r;
-    SimProgram sc(cand);
-    for (size_t i = 0; i < inputs.size(); i++) {
-        const RunResult &a = origRuns[i];
-        if (a.status == Status::TIMEOUT) continue;
-        bool wantTrace = i < timingSample;
-        RunResult b = sc.run(inputs[i], 20 * a.steps + 1000, wantTrace);
-        std::string d = compareRuns(a, b);
-        if (!d.empty()) { r.why = d + " on input " + std::to_string(i); return r; }
-        if (wantTrace) r.cycles += sc.cycles(b.trace, m);
-    }
-    (void)orig;
-    r.ok = true;
-    return r;
+int distinctRegisters(const Program &p) {
+    std::vector<uint32_t> regs(p.params.begin(), p.params.end());
+    for (const Block &b : p.blocks)
+        for (const Instr &in : b.ins) {
+            if (hasDest(in.op)) regs.push_back(in.dst);
+            for (int s = 0; s < in.nsrc; s++) if (in.src[s].isReg) regs.push_back(in.src[s].v);
+        }
+    std::sort(regs.begin(), regs.end());
+    return static_cast<int>(std::unique(regs.begin(), regs.end()) - regs.begin());
 }
 
-}  // namespace
+struct Cand {
+    Program p;
+    Flags flags;
+    std::string what;
+    uint64_t cycles = 0;
+    bool ok = false;
+};
 
-namespace {
-
-bool compileOnce(const Program &in, const Machine &m, int level, Program &out) {
+// Optimize `in` with the SSA pipeline and lower it; with both register
+// allocators when the plain one needs more names than the machine has.
+void compileVariants(const Program &in, const Machine &m, int level, const Flags &fl, const std::string &tag,
+                     bool tryK, std::vector<Cand> &out) {
     Func f;
     std::string err;
-    if (!buildSSA(in, f, err)) return false;
-    runPipeline(f, m, level);
+    if (!buildSSA(in, f, err)) return;
+    runPipeline(f, m, level, fl);
+    Func copy;
+    const bool scratch = tryK && canSpillToScratch(f);
+    if (scratch) copy = f;
     BackendOptions bo;
-    out = lowerToProgram(f, m, bo);
-    if (usesUnsupported(out, m)) out = legalize(out, m);
-    return true;
+    Cand c;
+    c.p = lowerToProgram(f, m, bo);
+    if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
+    c.what = tag;
+    c.flags = fl;
+    const bool overK = distinctRegisters(c.p) > m.registers;
+    out.push_back(std::move(c));
+    if (scratch && overK) {
+        bo.spillToK = true;
+        Cand k;
+        k.p = lowerToProgram(copy, m, bo);
+        if (usesUnsupported(k.p, m)) k.p = legalize(k.p, m);
+        k.what = tag + "+K";
+        k.flags = fl;
+        out.push_back(std::move(k));
+    }
 }
 
 }  // namespace
@@ -142,57 +165,101 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         origRuns.back().trace.clear();
         origRuns.back().trace.shrink_to_fit();
     }
-    std::string best = usesUnsupported(orig, m) ? printProgram(base) : origText;
-    uint64_t bestCycles = baseCycles;
-    auto consider = [&](const Program &cand, const char *what) {
-        Checked c = check(so, origRuns, cand, inputs, m, timingSample);
+    // Quick evaluation: behaviour and exact cycles on the timing sample.
+    auto quick = [&](Cand &c) {
+        SimProgram sc(c.p);
+        c.ok = true;
+        c.cycles = 0;
+        for (size_t i = 0; i < timingSample && i < inputs.size(); i++) {
+            const RunResult &a = origRuns[i];
+            if (a.status == Status::TIMEOUT) continue;
+            RunResult b = sc.run(inputs[i], 20 * a.steps + 1000, true);
+            std::string d = compareRuns(a, b);
+            if (!d.empty()) {
+                c.ok = false;
+                if (opt.verbose || opt.strict) fprintf(stderr, "kopt: %s failed quick check: %s\n", c.what.c_str(), d.c_str());
+                if (opt.strict) exit(3);
+                return;
+            }
+            c.cycles += sc.cycles(b.trace, m);
+        }
         if (opt.verbose)
-            fprintf(stderr, "kopt: %-14s %s, cycles %llu (input %llu), %zu instrs\n", what,
-                    c.ok ? "ok" : c.why.c_str(), static_cast<unsigned long long>(c.cycles),
-                    static_cast<unsigned long long>(baseCycles), cand.instrCount());
-        if (!c.ok && opt.strict) {
-            // Testing mode: a candidate that fails the self-check is a bug even
-            // though the fallback would hide it from the output.
-            fprintf(stderr, "kopt: STRICT: %s failed self-check: %s\n", what, c.why.c_str());
-            exit(3);
-        }
-        if (c.ok && c.cycles < bestCycles) {
-            best = printProgram(cand);
-            bestCycles = c.cycles;
-        }
-        return c.ok;
+            fprintf(stderr, "kopt: %-22s cycles %8llu (input %llu), %zu instrs, %d regs\n", c.what.c_str(),
+                    static_cast<unsigned long long>(c.cycles), static_cast<unsigned long long>(baseCycles),
+                    c.p.instrCount(), distinctRegisters(c.p));
     };
-    // Phase 1: the SSA pipeline (falling back to lower levels if the check fails).
-    Program phase1;
-    bool have1 = false;
-    for (int level = opt.maxLevel; level >= 1 && !have1; level--) {
-        Program cand;
-        if (!compileOnce(base, m, level, cand)) break;
-        if (consider(cand, level == opt.maxLevel ? "pipeline" : "pipeline-safe")) {
-            phase1 = cand;
-            have1 = true;
+    auto fullCheck = [&](const Cand &c) {
+        SimProgram sc(c.p);
+        for (size_t i = timingSample; i < inputs.size(); i++) {
+            const RunResult &a = origRuns[i];
+            if (a.status == Status::TIMEOUT) continue;
+            RunResult b = sc.run(inputs[i], 20 * a.steps + 1000, false);
+            std::string d = compareRuns(a, b);
+            if (!d.empty()) {
+                if (opt.verbose || opt.strict) fprintf(stderr, "kopt: %s failed full check: %s\n", c.what.c_str(), d.c_str());
+                if (opt.strict) exit(3);
+                return false;
+            }
         }
+        return true;
+    };
+
+    const bool small = base.instrCount() <= 20000;
+    std::vector<Cand> cands;
+    // Phase 1: the SSA pipeline, in a few flavours.
+    {
+        std::vector<Cand> p1;
+        for (int v = 0; v < (small ? 4 : 1); v++) {
+            Flags fl;
+            fl.reassoc = (v & 1) == 0;
+            fl.fuseReductions = (v & 2) != 0;
+            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1);
+        }
+        for (Cand &c : p1) quick(c);
+        for (Cand &c : p1) cands.push_back(c);
     }
-    // Phase 2: loop rotation and unrolling on the register form of phase 1,
-    // then the whole pipeline again. The exact cycle model picks the winner.
-    if (have1 && phase1.instrCount() <= 20000) {
+    // Phase 2: loop rotation and unrolling on the register form of the best
+    // phase-1 results, then the whole pipeline again.
+    if (small) {
+        std::vector<const Cand *> bases;
+        for (const Cand &c : cands) if (c.ok) bases.push_back(&c);
+        std::sort(bases.begin(), bases.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        if (bases.size() > 2) bases.resize(2);
+        std::vector<Program> basePrograms;
+        std::vector<std::string> baseNames;
+        std::vector<Flags> baseFlags;
+        for (const Cand *b : bases) { basePrograms.push_back(b->p); baseNames.push_back(b->what); baseFlags.push_back(b->flags); }
         const int budget = std::max(24, m.icache_size);
         const int factors[] = {1, 2, 4, 8};
-        for (int u : factors) {
-            std::vector<uint32_t> names;
-            Func rf = toRegisterForm(phase1, names);
-            bool rot = rotateLoops(rf, 8);
-            bool unr = unrollLoops(rf, u, budget);
-            if (!rot && !unr) continue;
-            Program transformed = fromRegisterForm(rf, names);
-            Program cand;
-            if (!compileOnce(transformed, m, opt.maxLevel, cand)) continue;
-            char what[32];
-            snprintf(what, sizeof what, "rotate+unroll%d", u);
-            consider(cand, what);
+        std::vector<Cand> p2;
+        for (size_t bi = 0; bi < basePrograms.size(); bi++) {
+            for (int u : factors) {
+                std::vector<uint32_t> names;
+                Func rf = toRegisterForm(basePrograms[bi], names);
+                bool rot = rotateLoops(rf, 8);
+                bool unr = unrollLoops(rf, u, budget);
+                if (!rot && !unr) continue;
+                Program transformed = fromRegisterForm(rf, names);
+                compileVariants(transformed, m, opt.maxLevel, baseFlags[bi],
+                                baseNames[bi] + "/unroll" + std::to_string(u), true, p2);
+            }
+        }
+        for (Cand &c : p2) quick(c);
+        for (Cand &c : p2) cands.push_back(std::move(c));
+    }
+    // Fastest first; the first one that passes the full check wins.
+    std::stable_sort(cands.begin(), cands.end(), [](const Cand &a, const Cand &b) {
+        if (a.ok != b.ok) return a.ok;
+        return a.cycles < b.cycles;
+    });
+    for (const Cand &c : cands) {
+        if (!c.ok || c.cycles >= baseCycles) break;
+        if (fullCheck(c)) {
+            if (opt.verbose) fprintf(stderr, "kopt: chose %s\n", c.what.c_str());
+            return printProgram(c.p);
         }
     }
-    return best;
+    return usesUnsupported(orig, m) ? printProgram(base) : origText;
 }
 
 }  // namespace kopt

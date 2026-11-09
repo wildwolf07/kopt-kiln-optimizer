@@ -19,6 +19,10 @@ bool mayTrap(Func &f, const Inst &x);
 // Is the address operand provably inside memory (< 4096)?
 bool addressInRange(Func &f, Opnd addr);
 
+// Is every load and store address provably below limit? (Then the scratch
+// region above it is free for the optimizer's own spill slots.)
+bool memoryAccessesBelow(Func &f, uint32_t limit);
+
 bool simplifyCFG(Func &f);         // fold constant branches, merge blocks, thread empty jumps
 bool sccp(Func &f);                // sparse conditional constant propagation
 bool instSimplify(Func &f);        // algebraic simplification + copy propagation + trivial phis
@@ -26,7 +30,8 @@ bool gvn(Func &f);                 // dominator-scoped value numbering incl. loa
 bool dce(Func &f);                 // remove values nobody needs (never removes possible traps)
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader
-bool fuseOps(Func &f, const Machine &m);      // mac / addsh / strength reduction for this machine
+bool reassociate(Func &f);         // shorten loop-carried add chains
+bool fuseOps(Func &f, const Machine &m, bool fuseReductions = false);   // mac / addsh for this machine
 bool ifConvert(Func &f, const Machine &m);    // small branches -> select
 
 }  // namespace kopt

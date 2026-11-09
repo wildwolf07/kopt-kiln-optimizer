@@ -14,7 +14,12 @@ struct BackendOptions {
     bool schedule = true;        // list-schedule each block for the machine model
     bool coalesce = true;        // remove copies by giving both sides one register
     bool profileLayout = true;   // use block frequencies to choose fall-throughs
+    bool spillToK = false;       // use at most K names, spilling to scratch memory if needed
 };
+
+// True when lowering with spillToK may use the scratch region (all of the
+// program's own memory accesses are provably below it).
+bool canSpillToScratch(Func &f);
 
 // Lower an optimized SSA function to a Program for machine m. The function is
 // consumed (phis are replaced by copies).

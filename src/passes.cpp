@@ -218,6 +218,17 @@ Range rangeOf(const Func &f, const std::vector<DefSite> &ds, Opnd o, int depth) 
 
 }  // namespace
 
+bool memoryAccessesBelow(Func &f, uint32_t limit) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Inst &x : B.insts)
+            if ((x.op == OP_LOAD || x.op == OP_STORE) && rangeOf(f, ds, x.a[0], 10).hi >= limit) return false;
+    }
+    return true;
+}
+
 bool addressInRange(Func &f, Opnd addr) {
     addr = f.resolve(addr);
     if (addr.isConst) return addr.c < kMemWords;
@@ -1111,11 +1122,153 @@ bool licm(Func &f) {
 }
 
 // ---------------------------------------------------------------------------
+// Recurrences: values on a cycle of the SSA graph (through loop phis). Their
+// dependence chain bounds how fast a loop iteration can go.
+// ---------------------------------------------------------------------------
+
+static std::vector<int> recurrenceIds(const Func &f) {
+    const int nv = f.nvals;
+    std::vector<std::vector<int>> succ(nv);   // operand -> user value
+    for (const BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (const Phi &p : B.phis)
+            for (auto &in : p.in) if (!in.second.isConst) succ[in.second.v].push_back(p.dst);
+        for (const Inst &x : B.insts)
+            if (x.dst >= 0)
+                for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) succ[x.a[a].v].push_back(x.dst);
+    }
+    // Tarjan, iterative.
+    std::vector<int> index(nv, -1), low(nv, 0), comp(nv, -1);
+    std::vector<char> onStack(nv, 0);
+    std::vector<int> st, sccSize;
+    int counter = 0, ncomp = 0;
+    struct Frame { int v; size_t i; };
+    for (int s = 0; s < nv; s++) {
+        if (index[s] >= 0) continue;
+        std::vector<Frame> call{{s, 0}};
+        index[s] = low[s] = counter++;
+        st.push_back(s);
+        onStack[s] = 1;
+        while (!call.empty()) {
+            Frame &fr = call.back();
+            int v = fr.v;
+            if (fr.i < succ[v].size()) {
+                int w = succ[v][fr.i++];
+                if (index[w] < 0) {
+                    index[w] = low[w] = counter++;
+                    st.push_back(w);
+                    onStack[w] = 1;
+                    call.push_back({w, 0});
+                } else if (onStack[w]) {
+                    low[v] = std::min(low[v], index[w]);
+                }
+            } else {
+                if (low[v] == index[v]) {
+                    int size = 0;
+                    while (true) {
+                        int w = st.back();
+                        st.pop_back();
+                        onStack[w] = 0;
+                        comp[w] = ncomp;
+                        size++;
+                        if (w == v) break;
+                    }
+                    sccSize.push_back(size);
+                    ncomp++;
+                }
+                call.pop_back();
+                if (!call.empty()) low[call.back().v] = std::min(low[call.back().v], low[v]);
+            }
+        }
+    }
+    std::vector<int> rec(nv, -1);
+    for (int v = 0; v < nv; v++) if (comp[v] >= 0 && sccSize[comp[v]] > 1) rec[v] = comp[v];
+    return rec;
+}
+
+// Reassociation: in a chain of adds that is part of a loop recurrence, add the
+// recurrence value last, so the loop-carried dependence is one add long and the
+// rest of the chain can run in parallel with it (32-bit addition wraps, so it is
+// associative and commutative and any order gives the same result).
+bool reassociate(Func &f) {
+    f.resolveAll();
+    std::vector<int> rec = recurrenceIds(f);
+    std::vector<DefSite> ds = defSites(f);
+    std::vector<int> uses(f.nvals, 0);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+        for (Inst &x : B.insts) for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) uses[x.a[a].v]++;
+    }
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        BB &B = f.bb[b];
+        if (!B.alive) continue;
+        for (size_t i = 0; i < B.insts.size(); i++) {
+            Inst root = B.insts[i];
+            if (root.op != OP_ADD || rec[root.dst] < 0) continue;
+            const int cyc = rec[root.dst];
+            // Collect leaves through single-use adds of this block that are on the same cycle.
+            std::vector<Opnd> leaves;
+            std::vector<Opnd> work{root.a[0], root.a[1]};
+            int inner = 0;
+            while (!work.empty()) {
+                Opnd o = work.back();
+                work.pop_back();
+                const Inst *d = defInst(f, ds, o);
+                if (d && d->op == OP_ADD && uses[o.v] == 1 && ds[o.v].block == b && rec[o.v] == cyc && inner < 16) {
+                    inner++;
+                    work.push_back(d->a[0]);
+                    work.push_back(d->a[1]);
+                } else {
+                    leaves.push_back(o);
+                }
+            }
+            if (inner == 0) continue;
+            std::vector<Opnd> carried, rest;
+            uint32_t constSum = 0;
+            bool haveConst = false;
+            for (Opnd o : leaves) {
+                if (o.isConst) { constSum += o.c; haveConst = true; }
+                else if (rec[o.v] == cyc) carried.push_back(o);
+                else rest.push_back(o);
+            }
+            if (carried.size() != 1 || rest.empty()) continue;
+            if (haveConst) rest.push_back(Opnd::cst(constSum));
+            // Build the off-cycle part first, right before the root.
+            std::vector<Inst> pre;
+            Opnd acc = rest[0];
+            for (size_t k = 1; k < rest.size(); k++) {
+                Inst a;
+                a.op = OP_ADD;
+                a.dst = f.newVal();
+                a.n = 2;
+                a.a[0] = acc;
+                a.a[1] = rest[k];
+                pre.push_back(a);
+                acc = Opnd::val(a.dst);
+            }
+            Inst &r = B.insts[i];
+            r.a[0] = carried[0];
+            r.a[1] = acc;
+            B.insts.insert(B.insts.begin() + i, pre.begin(), pre.end());
+            i += pre.size();
+            changed = true;
+            ds = defSites(f);
+            rec.resize(f.nvals, -1);
+            uses.resize(f.nvals, 0);
+        }
+    }
+    return changed;
+}
+
+// ---------------------------------------------------------------------------
 // Machine-specific fusion and strength reduction
 // ---------------------------------------------------------------------------
 
-bool fuseOps(Func &f, const Machine &m) {
+bool fuseOps(Func &f, const Machine &m, bool fuseReductions) {
     f.resolveAll();
+    std::vector<int> rec = recurrenceIds(f);
     std::vector<int> uses(f.nvals, 0);
     for (BB &B : f.bb) {
         if (!B.alive) continue;
@@ -1126,12 +1279,17 @@ bool fuseOps(Func &f, const Machine &m) {
     const bool macGood = m.fused_mac && m.lat_mac <= m.lat_mul + m.lat_alu;
     const bool addshGood = m.fused_addsh && m.lat_addsh <= 2 * m.lat_alu;
     bool changed = false;
+    int curBlock = -1;
+    // Only fuse with a producer in the same block: a producer that LICM hoisted
+    // out of a loop must not be pulled back in.
     auto single = [&](Opnd o, Op op) -> const Inst * {
         const Inst *p = defInst(f, ds, o);
-        return (p && p->op == op && uses[o.v] == 1) ? p : nullptr;
+        return (p && p->op == op && uses[o.v] == 1 && ds[o.v].block == curBlock) ? p : nullptr;
     };
-    for (BB &B : f.bb) {
+    for (int bi = 0; bi < static_cast<int>(f.bb.size()); bi++) {
+        BB &B = f.bb[bi];
         if (!B.alive) continue;
+        curBlock = bi;
         for (Inst &x : B.insts) {
             if (x.op == OP_ADD) {
                 bool done = false;
@@ -1139,6 +1297,13 @@ bool fuseOps(Func &f, const Machine &m) {
                     const Inst *p = single(x.a[side], OP_MUL);
                     if (!p) continue;
                     Opnd other = x.a[1 - side];
+                    // In a reduction (s += a*b) the add is on the loop-carried cycle but
+                    // the multiply is not: fusing would make every iteration wait
+                    // lat_mac instead of lat_alu. Fuse only when the product is on the
+                    // cycle too (Horner: acc = acc*x + c) or there is no cycle.
+                    bool addOnCycle = rec[x.dst] >= 0;
+                    bool mulOnCycle = addOnCycle && rec[x.a[side].v] == rec[x.dst];
+                    if (addOnCycle && !mulOnCycle && m.lat_mac > m.lat_alu && !fuseReductions) continue;
                     Inst y = x;
                     y.op = OP_MAC; y.n = 3; y.a[0] = p->a[0]; y.a[1] = p->a[1]; y.a[2] = other;
                     uses[x.a[side].v]--;
