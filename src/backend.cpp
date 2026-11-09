@@ -312,7 +312,7 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce) {
 // definition. With at most K names the machine never spills by itself.
 // ---------------------------------------------------------------------------
 
-bool allocateK(Func &f, int K, Allocation &A) {
+bool allocateK(Func &f, int K, Allocation &A, int reuse) {
     std::vector<int> slotOf;          // per value: scratch slot index or -1
     std::vector<char> noSpill;        // short temps created by spilling
     std::vector<int> web;             // spill web: copy-related values that may share a slot
@@ -513,7 +513,25 @@ bool allocateK(Func &f, int K, Allocation &A) {
                         st.op = OP_STORE; st.n = 2; st.a[0] = slotAddr(slotOf[p]); st.a[1] = Opnd::val(p);
                         out.push_back(st);
                     }
+            // Per block: which temp still holds each scratch word, and where it
+            // was last used. Within `reuse` instructions a use takes that temp
+            // instead of loading again. (Only spill code touches scratch: the
+            // program provably stays below it.)
+            struct Held { int slot, temp, last; };
+            std::vector<Held> held;
+            int pos = 0;
+            auto findHeld = [&](int slot) -> Held * {
+                for (Held &h : held) if (h.slot == slot) return &h;
+                return nullptr;
+            };
+            auto setHeld = [&](int slot, int temp) {
+                if (reuse <= 0) return;
+                Held *h = findHeld(slot);
+                if (h) { h->temp = temp; h->last = pos; }
+                else held.push_back({slot, temp, pos});
+            };
             for (Inst x : B.insts) {
+                pos++;
                 // A copy between two values in the same scratch word does nothing.
                 if (x.op == OP_MOV && x.dst >= 0 && slotOf[x.dst] >= 0 && !x.a[0].isConst &&
                     slotOf[x.a[0].v] == slotOf[x.dst])
@@ -524,10 +542,17 @@ bool allocateK(Func &f, int K, Allocation &A) {
                     int v = x.a[a].v, t = -1;
                     for (auto &l : loaded) if (l.first == v) t = l.second;
                     if (t < 0) {
-                        t = f.newVal();
-                        Inst ld;
-                        ld.op = OP_LOAD; ld.dst = t; ld.n = 1; ld.a[0] = slotAddr(slotOf[v]);
-                        out.push_back(ld);
+                        Held *h = findHeld(slotOf[v]);
+                        if (h && pos - h->last <= reuse) {
+                            t = h->temp;
+                            h->last = pos;
+                        } else {
+                            t = f.newVal();
+                            Inst ld;
+                            ld.op = OP_LOAD; ld.dst = t; ld.n = 1; ld.a[0] = slotAddr(slotOf[v]);
+                            out.push_back(ld);
+                            setHeld(slotOf[v], t);
+                        }
                         loaded.push_back({v, t});
                     }
                     x.a[a] = Opnd::val(t);
@@ -539,6 +564,8 @@ bool allocateK(Func &f, int K, Allocation &A) {
                         Inst st;
                         st.op = OP_STORE; st.n = 2; st.a[0] = slotAddr(slotOf[d]); st.a[1] = x.a[0];
                         out.push_back(st);
+                        Held *h = findHeld(slotOf[d]);
+                        if (h) *h = held.back(), held.pop_back();
                         continue;
                     }
                     int t = f.newVal();
@@ -547,6 +574,9 @@ bool allocateK(Func &f, int K, Allocation &A) {
                     Inst st;
                     st.op = OP_STORE; st.n = 2; st.a[0] = slotAddr(slotOf[d]); st.a[1] = Opnd::val(t);
                     out.push_back(st);
+                    Held *h = findHeld(slotOf[d]);
+                    if (h) *h = held.back(), held.pop_back();
+                    setHeld(slotOf[d], t);
                     continue;
                 }
                 out.push_back(x);
@@ -627,7 +657,13 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     bool haveK = false;
     if (scratchFree) {
         Func backup = f;
-        haveK = allocateK(f, m.registers, A);
+        // First with reloads shared inside a block; if the longer temps cannot
+        // be coloured, again with one reload per use.
+        haveK = allocateK(f, m.registers, A, opt.spillReuse);
+        if (!haveK && opt.spillReuse > 0) {
+            f = backup;
+            haveK = allocateK(f, m.registers, A, 0);
+        }
         if (!haveK) f = backup;
     }
     if (!haveK) A = allocate(f, m, opt.coalesce);
