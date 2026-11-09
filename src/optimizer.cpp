@@ -70,10 +70,11 @@ struct Flags {
     bool speculate = false;      // hoist pure work above branches
     bool strength = true;        // strength-reduce induction-variable multiplies
     bool loadPhis = false;       // loads at merges -> phis of known values
+    bool tabulate = false;       // state-machine dispatch -> packed tables
     bool storeSel = false;       // conditional stores with known old values -> select + store
     std::string name() const {
         return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "") +
-               (speculate ? "-spec" : "") + (strength ? "" : "-nosr") + (loadPhis ? "-lp" : "") + (storeSel ? "-ss" : "");
+               (speculate ? "-spec" : "") + (strength ? "" : "-nosr") + (loadPhis ? "-lp" : "") + (storeSel ? "-ss" : "") + (tabulate ? "-tab" : "");
     }
 };
 
@@ -115,6 +116,8 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         // run in the first round only (their facts stay valid afterwards).
         if (round == 0 || fsize < 20000) TIMED("vrp", (computeVRP(f), true));
         if (level >= 2 && fl.loadPhis && passEnabled("dupret")) c |= TIMED("dupret", dupConstReturns(f, 32, 512));
+        if (level >= 2 && fl.tabulate && passEnabled("tabulate"))
+            for (int r = 0; r < 4 && TIMED("tabulate", tabulateDispatch(f)); r++) c = true;
         if (level >= 2 && passEnabled("closedform"))
             for (int r = 0; r < 4 && TIMED("closedform", closedFormLoops(f)); r++) c = true;
         if (level >= 2 && passEnabled("popcount"))
@@ -557,15 +560,16 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         static const bool kVariants[][4] = {
             {true, false, false, true}, {false, false, false, true}, {false, true, false, true},
             {true, true, false, true}, {true, false, true, true}, {false, true, true, true},
-            {true, false, false, false}, {false, true, false, false},
+            {true, false, false, false}, {false, true, false, false}, {true, false, false, true},
         };
-        const int nVariants = effort == 2 ? 8 : (effort == 1 ? 2 : 1);
+        const int nVariants = effort == 2 ? 9 : (effort == 1 ? 2 : 1);
         for (int v = 0; v < nVariants; v++) {
             Flags fl;
             fl.reassoc = kVariants[v][0];
             fl.fuseReductions = kVariants[v][1];
             fl.speculate = kVariants[v][2];
             fl.strength = kVariants[v][3];
+            fl.tabulate = v == 8;
             compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1, effort == 0);
         }
         for (Cand &c : p1) quick(c);

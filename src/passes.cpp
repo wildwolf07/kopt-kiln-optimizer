@@ -2889,6 +2889,356 @@ bool divByConstant(Func &f, const Machine &m) {
     return changed;
 }
 
+// State-machine dispatch as a table. In a loop with a state phi
+//   s = phi(c0, s')   where s' is a phi at the join J of a branch region R
+// (R: blocks entered from E = idom(J), all paths reconverging at J, pure
+// instructions only), every input value R reads is either s, one small
+// "input" key t with a proven range [0, m], or a value R only passes on
+// (unchanged or plus a constant). s' takes constants (or s), so s ranges over a
+// known finite set. The region is evaluated at compile time for every
+// (s, t) pair: each phi of J becomes table(s, t) or p + table(s, t). Tables are
+// packed into 32-bit constants and read with shifts, so the branch tree
+// disappears. Every pair the program can reach is in the tables, and each
+// entry is what that path computes.
+bool tabulateDispatch(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        const int h = L.header;
+        if (irr[h] || h == 0 || L.latches.size() != 1) continue;
+        auto inL = [&](int b) { return b >= 0 && li.inLoop(b, static_cast<int>(l)); };
+        int pre = -1;
+        for (int p : f.bb[h].preds) if (!inL(p)) { if (pre >= 0) { pre = -2; break; } pre = p; }
+        if (pre < 0) continue;
+        for (const Phi &sp : f.bb[h].phis) {
+            if (sp.in.size() != 2) continue;
+            Opnd init, next;
+            for (auto &in : sp.in) { if (in.first == pre) init = f.resolve(in.second); else next = f.resolve(in.second); }
+            if (!init.isConst || next.isConst || next.v >= static_cast<int>(ds.size()) || !ds[next.v].isPhi) continue;
+            const int J = ds[next.v].block;
+            if (!inL(J) || J == h) continue;
+            const int E = d.idom[J];
+            if (E < 0 || !inL(E) || E == h) continue;
+            if (f.bb[E].term().op != OP_BR) continue;
+            // Region: blocks reachable from E's successors without reaching J or h.
+            std::vector<int> R;
+            std::vector<char> inR(f.bb.size(), 0);
+            std::vector<int> stack;
+            for (int k = 0; k < 2; k++) { int t = f.bb[E].term().tgt[k]; if (t != J && !inR[t]) { inR[t] = 1; stack.push_back(t); } }
+            bool ok = true;
+            while (!stack.empty() && ok) {
+                const int b = stack.back(); stack.pop_back();
+                if (b == h || b == E || !inL(b) || !d.dominates(E, b)) { ok = false; break; }
+                R.push_back(b);
+                int out[2];
+                int ns = f.succs(b, out);
+                if (ns == 0) ok = false;
+                for (int k = 0; k < ns; k++) {
+                    const int t = out[k];
+                    if (t == J) continue;
+                    if (!inR[t]) { inR[t] = 1; stack.push_back(t); }
+                }
+            }
+            if (!ok || R.size() < 2 || R.size() > 64) continue;
+            for (int p : f.bb[J].preds) if (p != E && !inR[p]) ok = false;
+            for (int b : R) {
+                for (size_t i = 0; i + 1 < f.bb[b].insts.size(); i++)
+                    if (!isPure(f.bb[b].insts[i].op) || f.bb[b].insts[i].dst < 0) ok = false;
+                // R's values must not escape (J's phis are replaced, everything else stays inside).
+            }
+            if (!ok) continue;
+            std::vector<char> inRval(f.nvals, 0);
+            for (int b : R) {
+                for (const Phi &ph : f.bb[b].phis) inRval[ph.dst] = 1;
+                for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inRval[x.dst] = 1;
+            }
+            for (int b = 0; b < static_cast<int>(f.bb.size()) && ok; b++) {
+                if (!f.bb[b].alive || inR[b]) continue;
+                for (const Phi &ph : f.bb[b].phis) {
+                    if (b == J) continue;
+                    for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst && inRval[o.v]) ok = false; }
+                }
+                for (const Inst &x : f.bb[b].insts)
+                    for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst && inRval[o.v]) ok = false; }
+            }
+            if (!ok) continue;
+            // State domain: init plus every constant J's phi feeds back.
+            std::vector<uint32_t> dom{init.c};
+            {
+                // Through the region's own merge phis down to constants (or s itself).
+                std::vector<int> work{next.v};
+                std::vector<char> seen(f.nvals, 0);
+                while (!work.empty() && ok) {
+                    const int v = work.back(); work.pop_back();
+                    if (seen[v]) continue;
+                    seen[v] = 1;
+                    const DefSite &dv = ds[v];
+                    if (!dv.isPhi || !(dv.block == J || (dv.block >= 0 && inR[dv.block]))) { ok = false; break; }
+                    for (const Phi &ph : f.bb[dv.block].phis) {
+                        if (ph.dst != v) continue;
+                        for (auto &in : ph.in) {
+                            Opnd o = f.resolve(in.second);
+                            if (o.isConst) { if (std::find(dom.begin(), dom.end(), o.c) == dom.end()) dom.push_back(o.c); }
+                            else if (o.v == sp.dst) continue;
+                            else if (o.v < static_cast<int>(ds.size())) work.push_back(o.v);
+                            else ok = false;
+                        }
+                    }
+                }
+            }
+            if (!ok || dom.size() > 16) continue;
+            std::sort(dom.begin(), dom.end());
+            if (dom.back() > 15) continue;
+            const Opnd sv = Opnd::val(sp.dst);
+            Opnd key;
+            uint32_t m = 0;
+            bool haveKey = false;
+            // Input key: the one other value R's control depends on, range [0, m].
+            auto considerKey = [&](Opnd o) {
+                if (o.isConst || o == sv || inRval[o.v]) return true;
+                if (haveKey) return o == key;
+                const Range r = rangeOf(f, ds, o, 6);
+                if (r.hi > 15) return false;
+                key = o; m = static_cast<uint32_t>(r.hi); haveKey = true;
+                return true;
+            };
+            // Leaves of a value's expression inside E/R (the values it really reads).
+            std::function<bool(Opnd, const std::function<bool(Opnd)> &, int)> leaves =
+                [&](Opnd o, const std::function<bool(Opnd)> &fn, int depth) -> bool {
+                    o = f.resolve(o);
+                    if (o.isConst) return true;
+                    if (o == sv || depth > 30) return fn(o);
+                    const int db = o.v < static_cast<int>(ds.size()) ? ds[o.v].block : -1;
+                    const bool local = db == E || (db >= 0 && inR[db]);
+                    const Inst *x = local && !ds[o.v].isPhi ? defInst(f, ds, o) : nullptr;
+                    if (!x || !isPure(x->op)) return fn(o);
+                    // Prefer reading through the expression; else the value itself is the key.
+                    const bool hk = haveKey; const Opnd kk = key; const uint32_t mm = m;
+                    bool all = true;
+                    for (int k2 = 0; k2 < x->n && all; k2++) if (!leaves(x->a[k2], fn, depth + 1)) all = false;
+                    if (all) return true;
+                    haveKey = hk; key = kk; m = mm;
+                    return fn(o);
+                };
+            auto considerKeyAll = [&](Opnd c, const std::function<bool(Opnd)> &fn) { return leaves(c, fn, 0); };
+            // Evaluate R for one (s, t) pair: path walk from E's branch to J.
+            std::vector<std::vector<Opnd>> outs;   // per pair, per J phi: value (const) or marker
+            const size_t nJ = f.bb[J].phis.size();
+            struct OutKind { int kind = -1; Opnd base; };   // 0 table, 1 base + table
+            std::vector<OutKind> kinds(nJ);
+            std::vector<std::vector<uint32_t>> tab(nJ);
+            // Symbolic value: c, or base + c with base a value from outside the region.
+            struct Sym { bool hasBase = false; Opnd base; uint32_t c = 0; };
+            auto run = [&](uint32_t sval, uint32_t tval) -> bool {
+                std::unordered_map<int, Sym> env;
+                std::function<bool(Opnd, Sym &, int)> ev = [&](Opnd o, Sym &out, int depth) -> bool {
+                    o = f.resolve(o);
+                    out = Sym();
+                    if (depth > 60) return false;
+                    if (o.isConst) { out.c = o.c; return true; }
+                    if (o == sv) { out.c = sval; return true; }
+                    if (haveKey && o == key) { out.c = tval; return true; }
+                    auto it = env.find(o.v);
+                    if (it != env.end()) { out = it->second; return true; }
+                    const int db = o.v < static_cast<int>(ds.size()) ? ds[o.v].block : -1;
+                    const bool local = db == E || (db >= 0 && inR[db]);
+                    if (!local) { out.hasBase = true; out.base = o; return true; }
+                    if (ds[o.v].isPhi) return false;   // region phis are set on entry
+                    const Inst *x = defInst(f, ds, o);
+                    if (!x || !isPure(x->op)) {
+                        if (db == E) { out.hasBase = true; out.base = o; return true; }   // e.g. the loaded word
+                        return false;
+                    }
+                    Sym a[3];
+                    for (int k = 0; k < x->n; k++) if (!ev(x->a[k], a[k], depth + 1)) return false;
+                    bool anyBase = false;
+                    for (int k = 0; k < x->n; k++) anyBase = anyBase || a[k].hasBase;
+                    if (!anyBase) {
+                        uint32_t r;
+                        if (!foldConstant(x->op, a[0].c, a[1].c, a[2].c, x->k, r)) return false;
+                        out.c = r;
+                    } else if (x->op == OP_ADD && x->n == 2 && !(a[0].hasBase && a[1].hasBase)) {
+                        out = a[0].hasBase ? a[0] : a[1];
+                        out.c += a[0].hasBase ? a[1].c : a[0].c;
+                    } else if (x->op == OP_SUB && a[0].hasBase && !a[1].hasBase) {
+                        out = a[0]; out.c -= a[1].c;
+                    } else if (x->op == OP_MOV) {
+                        out = a[0];
+                    } else if (db == E) {
+                        out = Sym(); out.hasBase = true; out.base = o;   // computed before the branch
+                    } else return false;
+                    env[o.v] = out;
+                    return true;
+                };
+                int cur = E, from = -1;
+                for (int steps = 0; steps < 70; steps++) {
+                    if (cur != E) {
+                        std::vector<std::pair<int, Sym>> set;
+                        for (const Phi &ph : f.bb[cur].phis) {
+                            Sym v;
+                            Opnd inv;
+                            for (auto &in : ph.in) if (in.first == from) inv = in.second;
+                            if (!ev(inv, v, 0)) return false;
+                            set.push_back({ph.dst, v});
+                        }
+                        for (auto &sv2 : set) env[sv2.first] = sv2.second;
+                    }
+                    const Inst &t = f.bb[cur].term();
+                    int nx;
+                    if (t.op == OP_JMP) nx = t.tgt[0];
+                    else if (t.op == OP_BR) {
+                        Sym c;
+                        if (!considerKeyAll(t.a[0], considerKey) || !ev(t.a[0], c, 0) || c.hasBase) {
+                            return false;
+                        }
+                        nx = c.c ? t.tgt[0] : t.tgt[1];
+                    } else return false;
+                    from = cur; cur = nx;
+                    if (cur == J) break;
+                }
+                if (cur != J) return false;
+                for (size_t q = 0; q < nJ; q++) {
+                    const Phi &ph = f.bb[J].phis[q];
+                    Opnd inv;
+                    for (auto &in : ph.in) if (in.first == from) inv = f.resolve(in.second);
+                    Sym v;
+                    if (!ev(inv, v, 0)) return false;
+                    if (!v.hasBase) {
+                        if (kinds[q].kind == 1) return false;
+                        kinds[q].kind = 0;
+                    } else {
+                        if (kinds[q].kind == 0) return false;
+                        if (kinds[q].kind == 1 && !(kinds[q].base == v.base)) return false;
+                        kinds[q].kind = 1; kinds[q].base = v.base;
+                    }
+                    tab[q].push_back(v.c);
+                }
+                return true;
+            };
+            (void)outs;
+            // First pass discovers the key (conditions name it); evaluate every pair.
+            // Keys appear in branch conditions; collect it by scanning R's conditions.
+            for (int b : R) {
+                const Inst &t = f.bb[b].term();
+                if (t.op == OP_BR && !considerKeyAll(t.a[0], considerKey)) ok = false;
+            }
+            if (!ok || !considerKeyAll(f.bb[E].term().a[0], considerKey)) continue;
+            const uint32_t nt = haveKey ? m + 1 : 1;
+            uint32_t tw = 1;
+            while ((1u << tw) < nt) tw++;
+            if (!haveKey) tw = 0;
+            const uint32_t nIdx = 16u << tw;   // state values are < 16
+            if (nIdx > 64) continue;
+            for (uint32_t sv0 = 0; sv0 < 16 && ok; sv0++) {
+                const bool inDom = std::find(dom.begin(), dom.end(), sv0) != dom.end();
+                for (uint32_t tv = 0; tv < (1u << tw) && ok; tv++) {
+                    if (inDom && tv < nt) ok = run(sv0, tv);
+                    else for (size_t q = 0; q < nJ; q++) tab[q].push_back(0);   // unreachable pair
+                }
+            }
+            if (!ok) continue;
+            // Pack each table; entries must fit in 32 bits overall.
+            std::vector<Inst> emit;
+            auto bin = [&](Op op, Opnd a, Opnd b2) -> Opnd {
+                uint32_t r;
+                if (a.isConst && b2.isConst && foldConstant(op, a.c, b2.c, 0, 0, r)) return Opnd::cst(r);
+                Inst t; t.op = op; t.dst = f.newVal(); t.n = 2; t.a[0] = a; t.a[1] = b2;
+                emit.push_back(t);
+                return Opnd::val(t.dst);
+            };
+            // Index = (state index << tw) | t. The state index is the raw value,
+            // or (when that needs more bits than the domain size) its position in
+            // the sorted domain, read from a packed nibble map (states <= 7).
+            uint32_t swRaw = 0;
+            while ((1u << swRaw) <= dom.back()) swRaw++;
+            uint32_t swCmp = 0;
+            while ((1u << swCmp) < dom.size()) swCmp++;
+            const bool remap = swCmp < swRaw && dom.back() <= 7;
+            const uint32_t sw = remap ? swCmp : swRaw;
+            std::vector<uint32_t> posOf(16, 0);
+            for (size_t k = 0; k < dom.size(); k++) posOf[dom[k]] = static_cast<uint32_t>(k);
+            const uint32_t pairs = 1u << (sw + tw);
+            std::vector<std::pair<Val, Opnd>> repl;
+            Opnd si = sv;
+            if (remap) {
+                uint32_t mapc = 0;
+                for (uint32_t v = 0; v < 8; v++) mapc |= (posOf[v] & 15u) << (4 * v);
+                si = bin(OP_AND, bin(OP_SHR, Opnd::cst(mapc), bin(OP_SHL, sv, Opnd::cst(2))), Opnd::cst(15));
+            }
+            const Opnd idx = haveKey ? bin(OP_OR, bin(OP_SHL, si, Opnd::cst(tw)), key) : si;
+            for (size_t q = 0; q < nJ && ok; q++) {
+                // compressed table in [state index][t] order
+                std::vector<uint32_t> ct(pairs, 0);
+                for (uint32_t v = 0; v < 16; v++) {
+                    if (std::find(dom.begin(), dom.end(), v) == dom.end()) continue;
+                    const uint32_t row = remap ? posOf[v] : v;
+                    for (uint32_t tv = 0; tv < (1u << tw); tv++) ct[(row << tw) | tv] = tab[q][(v << tw) | tv];
+                }
+                // Store entries relative to the smallest reachable one (signed), so
+                // small negative values (decrements) stay narrow.
+                std::vector<char> used(pairs, 0);
+                for (uint32_t v : dom) {
+                    const uint32_t row = remap ? posOf[v] : v;
+                    for (uint32_t tv = 0; tv < nt; tv++) used[(row << tw) | tv] = 1;
+                }
+                int64_t lo = INT64_MAX;
+                for (uint32_t k = 0; k < pairs; k++) if (used[k]) lo = std::min<int64_t>(lo, static_cast<int32_t>(ct[k]));
+                const uint32_t bias = static_cast<uint32_t>(lo);
+                for (uint32_t k = 0; k < pairs; k++) ct[k] = used[k] ? ct[k] - bias : 0;
+                uint32_t mx = 0;
+                for (uint32_t v : ct) mx = std::max(mx, v);
+                bool constant = mx == 0;
+                Opnd val;
+                if (constant) val = Opnd::cst(0);
+                else {
+                    uint32_t w = 1;
+                    while (w < 32 && (mx >> w) != 0) w++;
+                    uint32_t wp = 1;
+                    while (wp < w) wp <<= 1;   // power-of-two width: shift = idx << log2(wp)
+                    const uint64_t bits = static_cast<uint64_t>(wp) * pairs;
+                    if (bits > 64) { ok = false; break; }
+                    uint64_t packed = 0;
+                    for (uint32_t k = 0; k < pairs; k++) packed |= static_cast<uint64_t>(ct[k]) << (k * wp);
+                    uint32_t lw = 0;
+                    while ((1u << lw) < wp) lw++;
+                    const Opnd shamt = lw ? bin(OP_SHL, idx, Opnd::cst(lw)) : idx;
+                    // shr uses the low 5 bits of its amount, so the high word needs no adjustment.
+                    val = bin(OP_SHR, Opnd::cst(static_cast<uint32_t>(packed)), shamt);
+                    if (bits > 32) {
+                        const Opnd hi = bin(OP_SHR, Opnd::cst(static_cast<uint32_t>(packed >> 32)), shamt);
+                        const Opnd low = bin(OP_LT, shamt, Opnd::cst(32));
+                        Inst sl; sl.op = OP_SELECT; sl.dst = f.newVal(); sl.n = 3; sl.a[0] = low; sl.a[1] = val; sl.a[2] = hi;
+                        emit.push_back(sl);
+                        val = Opnd::val(sl.dst);
+                    }
+                    if (wp < 32) val = bin(OP_AND, val, Opnd::cst((1u << wp) - 1));
+                }
+                if (bias != 0) val = bin(OP_ADD, val, Opnd::cst(bias));
+                if (kinds[q].kind == 1) val = bin(OP_ADD, kinds[q].base, val);
+                repl.push_back({f.bb[J].phis[q].dst, val});
+            }
+            if (!ok) continue;
+            // Rewire: E computes everything and jumps to J; R becomes unreachable.
+            auto &ei = f.bb[E].insts;
+            ei.pop_back();
+            for (Inst &x : emit) ei.push_back(x);
+            Inst j; j.op = OP_JMP; j.n = 0; j.tgt[0] = J;
+            ei.push_back(j);
+            for (auto &r : repl) f.replaceAll(r.first, r.second);
+            f.bb[J].phis.clear();
+            for (int b : R) { f.bb[b].alive = false; f.bb[b].insts.clear(); f.bb[b].phis.clear(); }
+            f.rebuildPreds();
+            return true;
+        }
+    }
+    return false;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);

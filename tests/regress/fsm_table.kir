@@ -1,0 +1,53 @@
+; state machine with non-contiguous states, counters (+2, -1), unchanged-state paths
+func fsm_table(v0, v1)
+entry:
+  and v2, v0, 31
+  const v3, 0
+  const v4, 0
+  const v5, 100
+  const v6, 0
+  jmp head
+head:
+  lt v7, v6, v2
+  br v7, body, done
+body:
+  load v8, v6
+  and v9, v8, 3
+  eq v10, v3, 0
+  br v10, s0, n0
+s0:
+  eq v11, v9, 2
+  br v11, s0a, s0b
+s0a:
+  const v3, 3
+  add v4, v4, 2
+  jmp join
+s0b:
+  jmp join
+n0:
+  eq v12, v3, 3
+  br v12, s3, s7
+s3:
+  lt v13, v9, 2
+  br v13, s3a, s3b
+s3a:
+  const v3, 7
+  sub v5, v5, 1
+  jmp join
+s3b:
+  const v3, 0
+  jmp join
+s7:
+  eq v14, v9, 1
+  br v14, s7a, join
+s7a:
+  const v3, 0
+  add v4, v4, 5
+  jmp join
+join:
+  add v6, v6, 1
+  jmp head
+done:
+  vstore 0, v4
+  vstore 1, v5
+  ret v3
