@@ -2527,6 +2527,176 @@ bool deadScratchStores(Func &f) {
     return changed;
 }
 
+// Population-count loops. With a pure body, exits only at the header, and
+// only header phis used after the loop:
+//   (a) while (x) { x = x & (x - 1); s += K; }      -> s0 + K*pop(x0), x = 0
+//   (b) while (x) { s += x & 1; x = x >> 1; }        -> s0 + pop(x0),   x = 0
+//   (c) for (i = 0; i < 32; i++) s += (X >> i) & 1  -> s0 + pop(X),    i = 32
+// pop() is the branch-free SWAR count (exact for every 32-bit value; shr is
+// logical). Each loop runs exactly as many rounds as the count says, so the
+// exit values are the same.
+bool popcountLoops(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        const int h = L.header;
+        if (irr[h] || h == 0 || L.latches.size() != 1) continue;
+        auto inL = [&](int b) { return b >= 0 && li.inLoop(b, static_cast<int>(l)); };
+        std::vector<int> outside;
+        for (int p : f.bb[h].preds) if (!inL(p)) outside.push_back(p);
+        if (outside.size() != 1) continue;
+        const int pre = outside[0];
+        const BB &H = f.bb[h];
+        if (H.term().op != OP_BR || H.term().a[0].isConst) continue;
+        const int tIn = H.term().tgt[0], ex = H.term().tgt[1];
+        if (!inL(tIn) || inL(ex)) continue;
+        bool ok = true;
+        for (int b : L.blocks) {
+            const BB &B = f.bb[b];
+            if (b != h && !B.phis.empty()) { ok = false; break; }
+            int out[2];
+            int ns = f.succs(b, out);
+            for (int k = 0; k < ns; k++) if (!inL(out[k]) && b != h) ok = false;
+            for (size_t i = 0; i + 1 < B.insts.size(); i++)
+                if (!isPure(B.insts[i].op) || B.insts[i].dst < 0) ok = false;
+        }
+        if (!ok) continue;
+        std::vector<char> inLoopVal(f.nvals, 0);
+        for (int b : L.blocks) for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inLoopVal[x.dst] = 1;
+        for (int b = 0; b < static_cast<int>(f.bb.size()) && ok; b++) {
+            if (!f.bb[b].alive || inL(b)) continue;
+            for (const Phi &ph : f.bb[b].phis)
+                for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst && inLoopVal[o.v]) ok = false; }
+            for (const Inst &x : f.bb[b].insts)
+                for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst && inLoopVal[o.v]) ok = false; }
+        }
+        {
+            int out[2];
+            int ns = f.succs(pre, out);
+            for (int k = 0; k < ns; k++) if (out[k] == ex) ok = false;
+        }
+        if (!ok) continue;
+        auto invariant = [&](Opnd o) {
+            return o.isConst || (o.v < static_cast<int>(ds.size()) && (ds[o.v].block < 0 || !inL(ds[o.v].block)));
+        };
+        auto def = [&](Opnd o) -> const Inst * { o = f.resolve(o); return o.isConst ? nullptr : defInst(f, ds, o); };
+        auto phiIn = [&](const Phi &ph, Opnd &init, Opnd &next) {
+            if (ph.in.size() != 2) return false;
+            for (auto &in : ph.in) { if (in.first == pre) init = f.resolve(in.second); else next = f.resolve(in.second); }
+            return true;
+        };
+        auto isOp2 = [&](const Inst *x, Op op, Opnd a, Opnd b) {   // commutative match where needed
+            if (!x || x->op != op) return false;
+            Opnd p = f.resolve(x->a[0]), q = f.resolve(x->a[1]);
+            return (p == a && q == b) || ((op == OP_AND || op == OP_ADD) && p == b && q == a);
+        };
+        const Opnd c = f.resolve(H.term().a[0]);
+        int form = 0;
+        Val ctl = -1;          // controlling phi (x or i)
+        Opnd X;                // value whose bits are counted
+        for (const Phi &ph : H.phis) {
+            Opnd init, next;
+            if (!phiIn(ph, init, next)) { ok = false; break; }
+            if (c == Opnd::val(ph.dst)) {
+                const Inst *nx = def(next);
+                if (!nx) continue;
+                // (a) x & (x - 1) or x & (x + -1)
+                if (nx->op == OP_AND) {
+                    for (int sd = 0; sd < 2; sd++) {
+                        if (!(f.resolve(nx->a[sd]) == Opnd::val(ph.dst))) continue;
+                        const Inst *m1 = def(nx->a[1 - sd]);
+                        if (isOp2(m1, OP_SUB, Opnd::val(ph.dst), Opnd::cst(1)) || isOp2(m1, OP_ADD, Opnd::val(ph.dst), Opnd::cst(0xFFFFFFFFu)))
+                            { form = 1; ctl = ph.dst; X = init; }
+                    }
+                }
+                if (isOp2(nx, OP_SHR, Opnd::val(ph.dst), Opnd::cst(1))) { form = 2; ctl = ph.dst; X = init; }
+            }
+        }
+        if (!ok) continue;
+        if (!form) {
+            // (c) i from 0 while i < 32
+            const Inst *cd = def(c);
+            if (!cd || cd->op != OP_LT || !f.resolve(cd->a[1]).isC(32)) continue;
+            const Opnd iv = f.resolve(cd->a[0]);
+            for (const Phi &ph : H.phis) {
+                if (!(Opnd::val(ph.dst) == iv)) continue;
+                Opnd init, next;
+                phiIn(ph, init, next);
+                if (init.isC(0) && isOp2(def(next), OP_ADD, iv, Opnd::cst(1))) { form = 3; ctl = ph.dst; }
+            }
+            if (!form) continue;
+        }
+        // Accumulators.
+        struct Acc { Val phi; Opnd s0; Opnd k; };
+        std::vector<Acc> accs;
+        Opnd Xc;   // form 3: the counted word (same for every accumulator)
+        for (const Phi &ph : H.phis) {
+            if (ph.dst == ctl) continue;
+            Opnd init, next;
+            if (!phiIn(ph, init, next)) { ok = false; break; }
+            const Inst *ad = def(next);
+            if (!ad || ad->op != OP_ADD) { ok = false; break; }
+            Opnd other;
+            if (f.resolve(ad->a[0]) == Opnd::val(ph.dst)) other = f.resolve(ad->a[1]);
+            else if (f.resolve(ad->a[1]) == Opnd::val(ph.dst)) other = f.resolve(ad->a[0]);
+            else { ok = false; break; }
+            if (form == 1) {
+                if (!invariant(other)) { ok = false; break; }
+                accs.push_back({ph.dst, init, other});
+            } else if (form == 2) {
+                if (!isOp2(def(other), OP_AND, Opnd::val(ctl), Opnd::cst(1))) { ok = false; break; }
+                accs.push_back({ph.dst, init, Opnd::cst(1)});
+            } else {
+                const Inst *an = def(other);
+                if (!an || an->op != OP_AND) { ok = false; break; }
+                Opnd sh;
+                if (f.resolve(an->a[1]).isC(1)) sh = f.resolve(an->a[0]);
+                else if (f.resolve(an->a[0]).isC(1)) sh = f.resolve(an->a[1]);
+                else { ok = false; break; }
+                const Inst *si = def(sh);
+                if (!si || si->op != OP_SHR || !(f.resolve(si->a[1]) == Opnd::val(ctl)) || !invariant(f.resolve(si->a[0]))) { ok = false; break; }
+                const Opnd w = f.resolve(si->a[0]);
+                if (accs.empty()) Xc = w;
+                else if (!(Xc == w)) { ok = false; break; }
+                accs.push_back({ph.dst, init, Opnd::cst(1)});
+            }
+        }
+        if (!ok || accs.empty()) continue;
+        if (form == 3) X = Xc;
+        std::vector<Inst> emit;
+        auto bin = [&](Op op, Opnd a, Opnd b) -> Opnd {
+            uint32_t r;
+            if (a.isConst && b.isConst && foldConstant(op, a.c, b.c, 0, 0, r)) return Opnd::cst(r);
+            Inst t; t.op = op; t.dst = f.newVal(); t.n = 2; t.a[0] = a; t.a[1] = b;
+            emit.push_back(t);
+            return Opnd::val(t.dst);
+        };
+        Opnd a1 = bin(OP_SUB, X, bin(OP_AND, bin(OP_SHR, X, Opnd::cst(1)), Opnd::cst(0x55555555u)));
+        Opnd b1 = bin(OP_ADD, bin(OP_AND, a1, Opnd::cst(0x33333333u)), bin(OP_AND, bin(OP_SHR, a1, Opnd::cst(2)), Opnd::cst(0x33333333u)));
+        Opnd c1 = bin(OP_AND, bin(OP_ADD, b1, bin(OP_SHR, b1, Opnd::cst(4))), Opnd::cst(0x0F0F0F0Fu));
+        Opnd pop = bin(OP_SHR, bin(OP_MUL, c1, Opnd::cst(0x01010101u)), Opnd::cst(24));
+        std::vector<std::pair<Val, Opnd>> finals;
+        finals.push_back({ctl, form == 3 ? Opnd::cst(32) : Opnd::cst(0)});
+        for (const Acc &a : accs) finals.push_back({a.phi, bin(OP_ADD, a.s0, a.k.isC(1) ? pop : bin(OP_MUL, a.k, pop))});
+        auto &pi = f.bb[pre].insts;
+        pi.insert(pi.end() - 1, emit.begin(), emit.end());
+        Inst &pt = f.bb[pre].term();
+        int nt = pt.op == OP_JMP ? 1 : (pt.op == OP_BR ? 2 : 0);
+        for (int k = 0; k < nt; k++) if (pt.tgt[k] == h) pt.tgt[k] = ex;
+        for (Phi &ph : f.bb[ex].phis)
+            for (auto &in : ph.in) if (in.first == h) in.first = pre;
+        for (auto &fv : finals) f.replaceAll(fv.first, fv.second);
+        f.rebuildPreds();
+        return true;
+    }
+    return false;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);

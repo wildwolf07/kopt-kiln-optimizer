@@ -1,0 +1,44 @@
+; three population-count loop shapes on raw words, with a scaled count
+func popcount_forms(v0, v1, v2)
+entry:
+  mov v3, v0
+  const v4, 0
+  jmp ka
+ka:
+  br v3, kb, kx
+kb:
+  sub v5, v3, 1
+  and v3, v3, v5
+  add v4, v4, 3
+  jmp ka
+kx:
+  mov v6, v1
+  const v7, 0
+  jmp sa
+sa:
+  br v6, sb, sx
+sb:
+  and v8, v6, 1
+  add v7, v7, v8
+  shr v6, v6, 1
+  jmp sa
+sx:
+  const v9, 0
+  const v10, 7
+  jmp ia
+ia:
+  lt v11, v9, 32
+  br v11, ib, ix
+ib:
+  shr v12, v2, v9
+  and v13, v12, 1
+  add v10, v10, v13
+  add v9, v9, 1
+  jmp ia
+ix:
+  vstore 0, v4
+  vstore 1, v7
+  vstore 2, v3
+  add v14, v4, v7
+  add v15, v14, v10
+  ret v15
