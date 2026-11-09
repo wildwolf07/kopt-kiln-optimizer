@@ -31,7 +31,8 @@ late candidate stage adds load phis (loads below merges become phis of values
 every predecessor already knows) and store selects (a conditional store whose
 old value is known becomes an unconditional store of a select).
 
-Register-form transformations: rotation, ordinary unrolling, peeling,
+Register-form transformations: rotation, ordinary unrolling (innermost loops,
+or whole top-level loop nests), peeling,
 splitting of multi-entry (irreducible) cycles, repeated peeling of short
 constant-trip loop nests ("flatten"), threading, invariant-condition
 unswitching and two complementary counted-loop

@@ -108,7 +108,7 @@ bool rotateLoops(Func &f, int maxHeaderSize) {
     return changed;
 }
 
-bool unrollLoops(Func &f, int factor, int sizeBudget) {
+bool unrollLoops(Func &f, int factor, int sizeBudget, bool outer) {
     if (factor < 2) return false;
     f.rebuildPreds();
     DomInfo d = computeDominators(f);
@@ -121,7 +121,10 @@ bool unrollLoops(Func &f, int factor, int sizeBudget) {
         bool innermost = true;
         for (size_t o = 0; o < li.loops.size(); o++)
             if (o != l && li.loops[o].parent == static_cast<int>(l)) innermost = false;
-        if (!innermost || irr[L.header] || L.header == 0) continue;
+        // Outer mode: top-level loops that contain other loops (inner back
+        // edges stay inside each copy, so the cloning below is the same).
+        if (outer ? (innermost || L.parent != -1) : !innermost) continue;
+        if (irr[L.header] || L.header == 0) continue;
         int size = 0;
         for (int b : L.blocks) size += static_cast<int>(f.bb[b].insts.size());
         if (size * factor > sizeBudget) continue;

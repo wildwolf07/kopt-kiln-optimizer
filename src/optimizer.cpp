@@ -505,6 +505,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             bool reduced = false;   // also in the reduced search (up to 4000 instructions)
             bool huge = false;      // also for the biggest programs (one cheap transform)
             bool headCounted = false;
+            int outer = 0;          // unroll factor for top-level loop nests
         };
         static const Plan plans[] = {
             {"unroll1", 1, 0, false, 0, false, false, true}, {"unroll2", 2, 0, false, 0, false, true}, {"unroll4", 4, 0, false, 0},
@@ -516,6 +517,9 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             {"counted2", 0, 0, false, 2, false, false, false, true},
             {"counted4", 0, 0, false, 4, false, false, false, true},
             {"counted8", 0, 0, false, 8, false, false, false, true},
+            {"ounroll2", 0, 0, false, 0, false, false, false, false, 2},
+            {"ounroll4", 0, 0, false, 0, false, false, false, false, 4},
+            {"ounroll2+unroll2", 2, 0, false, 0, false, false, false, false, 2},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
@@ -531,6 +535,11 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 }
                 if (pl.unswitch) {
                     if (!unswitchLoops(rf, 2 * budget)) continue;
+                    any = true;
+                }
+                if (pl.outer) {
+                    any |= rotateLoops(rf, 8);
+                    if (!unrollLoops(rf, pl.outer, 2 * budget, true)) continue;
                     any = true;
                 }
                 if (pl.peel) any |= peelLoops(rf, pl.peel, 2 * std::max(64, m.icache_size));

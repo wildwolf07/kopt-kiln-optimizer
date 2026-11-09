@@ -26,7 +26,8 @@ bool rotateLoops(Func &f, int maxHeaderSize);
 
 // Replicate the body of innermost loops `factor` times (exits kept in every
 // copy). Loops whose replicated size would exceed sizeBudget are left alone.
-bool unrollLoops(Func &f, int factor, int sizeBudget);
+// outer: instead unroll top-level loops that contain other loops (whole nest).
+bool unrollLoops(Func &f, int factor, int sizeBudget, bool outer = false);
 
 // Peel `count` iterations of innermost loops: copies of the body run first,
 // then the original loop. With a constant trip count <= count, constant
