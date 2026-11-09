@@ -2146,6 +2146,67 @@ bool dupConstReturns(Func &f, int maxSize, int maxNew) {
     return changed;
 }
 
+// Forwarding through stores that may alias: in a block,
+//   ... [A] known as v0 ...; store B1, w1; ...; load A
+// where Bi may or may not equal A: the load's value is
+//   select(A == Bk, wk, ... select(A == B1, w1, v0))
+// (later stores win). At most two such stores; no volatile access between.
+// A was already accessed, so dropping the load cannot lose a trap.
+bool aliasForward(Func &f) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    auto sameAddr = [&](Opnd a, Opnd b) {
+        a = f.resolve(a); b = f.resolve(b);
+        if (a == b) return true;
+        AddrForm x = addrForm(f, ds, a), y = addrForm(f, ds, b);
+        return x.hasBase == y.hasBase && (!x.hasBase || x.base == y.base) && x.off == y.off;
+    };
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        if (!f.bb[b].alive) continue;
+        for (size_t i = 0; i < f.bb[b].insts.size(); i++) {
+            const Inst x = f.bb[b].insts[i];
+            if (x.op != OP_LOAD || x.dst < 0) continue;
+            const Opnd A = f.resolve(x.a[0]);
+            std::vector<std::pair<Opnd, Opnd>> between;   // (address, value), newest first
+            Opnd v0;
+            bool found = false, fail = false;
+            for (size_t k = i; k-- > 0 && !found && !fail;) {
+                const Inst &y = f.bb[b].insts[k];
+                if (y.op == OP_VSTORE || y.op == OP_VLOAD) { fail = true; break; }
+                if (y.op == OP_STORE) {
+                    const Opnd B = f.resolve(y.a[0]);
+                    if (sameAddr(B, A)) { v0 = f.resolve(y.a[1]); found = true; break; }
+                    if (mustDiffer(f, ds, B, A)) continue;
+                    if (between.size() >= 2) { fail = true; break; }
+                    between.push_back({B, f.resolve(y.a[1])});
+                } else if (y.op == OP_LOAD && y.dst >= 0 && sameAddr(y.a[0], A)) {
+                    v0 = Opnd::val(y.dst); found = true; break;
+                }
+            }
+            if (!found || fail || between.empty()) continue;
+            std::vector<Inst> pre;
+            Opnd v = v0;
+            for (size_t q = between.size(); q-- > 0;) {   // oldest first
+                Inst e; e.op = OP_EQ; e.dst = f.newVal(); e.n = 2; e.a[0] = A; e.a[1] = between[q].first;
+                Inst sl; sl.op = OP_SELECT; sl.dst = f.newVal(); sl.n = 3;
+                sl.a[0] = Opnd::val(e.dst); sl.a[1] = between[q].second; sl.a[2] = v;
+                pre.push_back(e); pre.push_back(sl);
+                v = Opnd::val(sl.dst);
+            }
+            f.replaceAll(x.dst, v);
+            Inst &y = f.bb[b].insts[i];
+            y.op = OP_MOV; y.n = 1; y.a[0] = v;
+            auto &ins = f.bb[b].insts;
+            ins.insert(ins.begin() + static_cast<long>(i), pre.begin(), pre.end());
+            i += pre.size();
+            ds = defSites(f);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);
