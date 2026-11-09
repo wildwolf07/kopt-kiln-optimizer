@@ -992,6 +992,10 @@ bool strengthReduce(Func &f) {
                     Inst &x = f.bb[b].insts[i];
                     if (x.op != OP_MUL || !x.a[1].isConst || x.a[0].isConst || f.resolve(x.a[0]) != Opnd::val(p.dst)) continue;
                     const uint32_t c = x.a[1].c;
+                    // Copy now: inserting below may shift (or reallocate) this
+                    // block's instruction list, and x would then name another
+                    // instruction.
+                    const Val xdst = x.dst;
                     const Val q = f.newVal(), qn = f.newVal();
                     Phi qp;
                     qp.dst = q;
@@ -1004,7 +1008,7 @@ bool strengthReduce(Func &f) {
                     size_t pos = 0;
                     while (pos < nb.size() && nb[pos].dst != next.v) pos++;
                     nb.insert(nb.begin() + std::min(pos + 1, nb.size() - 1), inc);
-                    f.replaceAll(x.dst, Opnd::val(q));
+                    f.replaceAll(xdst, Opnd::val(q));
                     f.bb[h].phis.push_back(qp);
                     ds = defSites(f);
                     changed = true;

@@ -1,0 +1,23 @@
+; Strength reduction once replaced the wrong value here: inserting the new
+; induction step into the same block shifted the instruction list under a
+; held reference, so "i + 1000" was rewritten instead of "i * 7". Only the
+; input 1234567 takes the select's other side.
+func strength_shifted(v0)
+entry:
+  eq v9, v0, 1234567
+  mov v1, 0
+  mov v2, 0
+  jmp head
+head:
+  lt v3, v1, 10
+  br v3, body, exit
+body:
+  mov v5, v1
+  add v1, v1, 1
+  add v6, v5, 1000
+  mul v4, v5, 7
+  select v7, v9, v6, v4
+  add v2, v2, v7
+  jmp head
+exit:
+  ret v2

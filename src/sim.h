@@ -55,6 +55,11 @@ std::vector<Input> generateInputs(int nparams, int count, uint64_t seed);
 // used to estimate the cycles a judge would measure.
 std::vector<Input> typicalInputs(int nparams, int count, uint64_t seed);
 
+// Inputs built from the program's own literals (and +-1): arguments, memory
+// words and volatile inputs equal to the constants it compares against, so
+// rarely taken paths ("if x == 1234567") are exercised by the self-check.
+std::vector<Input> literalInputs(const Program &p, int count, uint64_t seed);
+
 enum class Status { RET, TRAP, TIMEOUT };
 enum class TrapKind { NONE, DIV_BY_ZERO, BAD_ADDRESS, EXPLICIT };
 

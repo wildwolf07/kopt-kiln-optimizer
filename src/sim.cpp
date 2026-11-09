@@ -2,6 +2,8 @@
 // where it matters (slot numbering, touch order, LRU spill model, fences).
 #include "sim.h"
 
+#include <algorithm>
+
 #include <cstdlib>
 #include <deque>
 #include <unordered_map>
@@ -121,6 +123,43 @@ std::vector<Input> generateInputs(int nparams, int count, uint64_t seed) {
         for (uint32_t port = 0; port < 4; port++) {
             std::vector<uint32_t> q(16);
             for (int t = 0; t < 16; t++) q[t] = static_cast<uint32_t>(rng.below(1000));
+            in.vin[port] = q;
+        }
+        out.push_back(std::move(in));
+    }
+    return out;
+}
+
+std::vector<Input> literalInputs(const Program &p, int count, uint64_t seed) {
+    std::vector<uint32_t> lits;
+    for (const Block &b : p.blocks)
+        for (const Instr &x : b.ins)
+            for (int s = 0; s < x.nsrc; s++)
+                if (!x.src[s].isReg)
+                    for (uint32_t d : {0u, 1u, 0xFFFFFFFFu}) lits.push_back(x.src[s].v + d);
+    std::sort(lits.begin(), lits.end());
+    lits.erase(std::unique(lits.begin(), lits.end()), lits.end());
+    std::vector<Input> out;
+    if (lits.empty()) return out;
+    Rng rng(seed);
+    const int np = static_cast<int>(p.params.size());
+    auto pick = [&]() { return lits[rng.below(lits.size())]; };
+    for (int i = 0; i < count; i++) {
+        Input in;
+        for (int j = 0; j < np; j++) {
+            // First inputs: every literal in turn for all parameters; then mixes.
+            if (i < static_cast<int>(lits.size()) && rng.below(4) != 0) in.args.push_back(lits[(i + j) % lits.size()]);
+            else if (rng.below(3) == 0) in.args.push_back(static_cast<uint32_t>(rng.below(16)));
+            else in.args.push_back(pick());
+        }
+        std::vector<uint32_t> words(256);
+        const bool litMem = rng.below(2) == 0;
+        for (int w = 0; w < 256; w++)
+            words[w] = litMem && rng.below(2) == 0 ? pick() : static_cast<uint32_t>(rng.below(16));
+        in.segments.push_back({0, words});
+        for (uint32_t port = 0; port < 4; port++) {
+            std::vector<uint32_t> q(16);
+            for (int t = 0; t < 16; t++) q[t] = rng.below(2) == 0 ? pick() : static_cast<uint32_t>(rng.below(100));
             in.vin[port] = q;
         }
         out.push_back(std::move(in));

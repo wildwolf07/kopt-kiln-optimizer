@@ -296,6 +296,8 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     inputs.insert(inputs.end(), gen.begin(), gen.end());
     std::vector<Input> more = generateInputs(np, nCheck / 2, 0x4b494c4eull);
     inputs.insert(inputs.end(), more.begin(), more.end());
+    std::vector<Input> lit = literalInputs(base, nCheck / 2, 0x4c495453ull);
+    inputs.insert(inputs.end(), lit.begin(), lit.end());
     const size_t timingSample = 16;   // the typical inputs
     std::vector<RunResult> origRuns;
     std::vector<uint64_t> baseCyc(timingSample, 0);

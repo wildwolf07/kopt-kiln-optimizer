@@ -14,6 +14,7 @@ import argparse
 import multiprocessing as mp
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -92,8 +93,11 @@ class Gen(object):
         d = self.reg()
         if r < 0.40:
             out.append("%s %s, %s, %s" % (rng.choice(BIN), d, self.src(), self.src()))
-        elif r < 0.47:
+        elif r < 0.44:
             out.append("const %s, %d" % (d, rng.choice(LITS)))
+        elif r < 0.47:
+            # a rarely true test: only one input value takes this path
+            out.append("eq %s, %s, %d" % (d, self.reg(), rng.choice([1234567, 99991, 4242, 77777777])))
         elif r < 0.52:
             out.append("mov %s, %s" % (d, self.src()))
         elif r < 0.57:
@@ -211,6 +215,70 @@ def ptr_program(rng, mc):
     return "\n".join(L) + "\n"
 
 
+def iv_program(rng, mc):
+    """Counted loops whose body derives several values from the induction
+    variable (i*c, i+c, i<<c, i-c), mixes them with selects on a rarely true
+    condition and accumulates: the shapes strength reduction, reassociation
+    and unrolling rewrite."""
+    g = Gen(rng, mc)
+    g.memmode = rng.choice(["none", "bounded"])
+    g.nregs = rng.randint(4, 12)
+    g.nparams = 2
+    i, n, acc, rare, t1, t2, t3, c = ("v%d" % (g.nregs + x) for x in range(8))
+    L = ["func f(v0, v1)", "entry:",
+         "  eq %s, v0, %d" % (rare, rng.choice([1234567, 4242, 99991])),
+         "  and %s, v%d, %d" % (n, rng.randrange(2), rng.choice([7, 15, 63])),
+         "  const %s, %d" % (i, rng.choice([0, 0, 1, 3])),
+         "  const %s, %d" % (acc, rng.choice([0, 5]))]
+    L += ["  jmp head", "head:"]
+    bound = n if rng.random() < 0.7 else str(rng.choice([4, 10, 17]))
+    L += ["  lt %s, %s, %s" % (c, i, bound), "  br %s, body, exit" % c, "body:"]
+    body = []
+    ops = [lambda d: "mul %s, %s, %d" % (d, i, rng.choice([3, 4, 7, 12, -5])),
+           lambda d: "add %s, %s, %d" % (d, i, rng.choice([1, 1000, -3])),
+           lambda d: "shl %s, %s, %d" % (d, i, rng.choice([1, 2, 5])),
+           lambda d: "sub %s, %s, %d" % (d, i, rng.choice([1, 9])),
+           lambda d: "mov %s, %s" % (d, i)]
+    for d in (t1, t2, t3):
+        body.append(rng.choice(ops)(d))
+        if rng.random() < 0.3:
+            g.instr(body)
+    if rng.random() < 0.5:
+        body.append("add %s, %s, %d" % (i, i, rng.choice([1, 1, 2])))   # step before the uses below
+        late = True
+    else:
+        late = False
+    body.append("select %s, %s, %s, %s" % (t1, rare, t1, t2))
+    body.append(rng.choice(["add", "xor", "sub"]) + " %s, %s, %s" % (acc, acc, t1))
+    body.append("add %s, %s, %s" % (acc, acc, t3))
+    if not late:
+        body.append("add %s, %s, %d" % (i, i, rng.choice([1, 1, 2])))
+    L += ["  " + b for b in body]
+    L += ["  jmp head", "exit:", "  ret %s" % acc]
+    return "\n".join(L) + "\n"
+
+
+def literal_inputs(src, nparams, rng, count=24):
+    """Inputs whose arguments, memory words and volatile values are the
+    program's own literals (+-1), so "if x == 1234567" paths run too."""
+    lits = set()
+    for tok in re.findall(r"(?<![v\w])-?\d+", src):
+        v = int(tok) & 0xFFFFFFFF
+        for d in (0, 1, -1):
+            lits.add((v + d) & 0xFFFFFFFF)
+    lits = sorted(lits)
+    if not lits:
+        return []
+    out = []
+    for i in range(count):
+        args = [lits[(i + j) % len(lits)] if rng.random() < 0.7 else rng.choice(lits) for j in range(nparams)]
+        words = [rng.choice(lits) if rng.random() < 0.5 else rng.randrange(16) for _ in range(256)]
+        vin = {port: [rng.choice(lits) if rng.random() < 0.5 else rng.randrange(100) for _ in range(16)]
+               for port in range(4)}
+        out.append(K.Inputs(args, [(0, words)], vin))
+    return out
+
+
 def write_machine(path, mc):
     with open(path, "w") as f:
         for k, v in mc.items():
@@ -221,7 +289,8 @@ def one(args):
     idx, seed, ninputs = args
     rng = random.Random(seed * 1000003 + idx)
     mc = rand_machine(rng)
-    src = ptr_program(rng, mc) if rng.random() < 0.25 else Gen(rng, mc).program()
+    r = rng.random()
+    src = ptr_program(rng, mc) if r < 0.2 else iv_program(rng, mc) if r < 0.4 else Gen(rng, mc).program()
     with tempfile.TemporaryDirectory() as td:
         pin, pout, pm = (os.path.join(td, n) for n in ("in.kir", "out.kir", "m.cfg"))
         with open(pin, "w") as f:
@@ -242,7 +311,7 @@ def one(args):
         except K.KirError as e:
             return ("INVALID", idx, str(e), src, mc)
         cp0, cp1 = K.compile_program(orig), K.compile_program(opt)
-        for inp in K.generate_inputs(len(orig.params), ninputs, seed * 7919 + idx):
+        for inp in K.generate_inputs(len(orig.params), ninputs, seed * 7919 + idx) + literal_inputs(src, len(orig.params), rng):
             a = K.execute(cp0, inp.args, inp.segments, inp.vin, 20000)
             if a.status == "TIMEOUT":
                 continue
