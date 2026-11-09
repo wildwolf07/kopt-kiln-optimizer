@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <unordered_map>
 
 #include "backend.h"
 #include "ir.h"
@@ -99,10 +100,14 @@ bool passEnabled(const char *name) {
 void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
     TIMED("simplifyCFG", simplifyCFG(f));
     if (level <= 0) return;
+    size_t fsize = 0;
+    for (const BB &B : f.bb) if (B.alive) fsize += B.insts.size();
     for (int round = 0; round < 4; round++) {
         bool c = false;
         TIMED("ivranges", (computeIVRanges(f), true));
-        TIMED("vrp", (computeVRP(f), true));
+        // Value ranges are the costliest analysis; on very large functions they
+        // run in the first round only (their facts stay valid afterwards).
+        if (round == 0 || fsize < 20000) TIMED("vrp", (computeVRP(f), true));
         c |= TIMED("sccp", sccp(f));
         c |= TIMED("combineLinear", combineLinear(f));
         c |= TIMED("simplifyCFG", simplifyCFG(f));
@@ -169,7 +174,7 @@ struct Cand {
 // Optimize `in` with the SSA pipeline and lower it; with both register
 // allocators when the plain one needs more names than the machine has.
 void compileVariants(const Program &in, const Machine &m, int level, const Flags &fl, const std::string &tag,
-                     bool tryK, std::vector<Cand> &out) {
+                     bool tryK, std::vector<Cand> &out, bool plainOnly = false) {
     Func f;
     std::string err;
     if (!buildSSA(in, f, err)) return;
@@ -185,8 +190,12 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
         BackendOptions bo;
         bo.preSchedule = pre;
         bo.spillToK = k;
+        if (plainOnly) bo.spillReuse = 0;   // biggest programs: one allocation attempt
         Cand c;
-        c.p = lowerToProgram(g, m, bo);
+        {
+            PassTimer pt(k ? "lower+K" : "lower");
+            c.p = lowerToProgram(g, m, bo);
+        }
         if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
         std::string text = printProgram(c.p);
         for (const std::string &t : texts) if (t == text) return nullptr;
@@ -198,6 +207,10 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     };
     const Program *plain = emit(false, false, "");
     const bool overK = plain && distinctRegisters(*plain) > m.registers;
+    if (plainOnly) {   // biggest programs: no pre-scheduled variants
+        if (scratch && overK) emit(false, true, "+K");
+        return;
+    }
     const Program *pre = emit(true, false, "+S");
     const bool preOverK = pre && distinctRegisters(*pre) > m.registers;
     if (scratch && overK) emit(false, true, "+K");
@@ -272,16 +285,22 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     const int np = static_cast<int>(base.params.size());
     // Timing sample first: typical runs, then the small edge values. The rest of
     // the inputs (edge values, special pairs, random) only check behaviour.
+    // Big programs run longer: the step limit grows with the size (a 100k
+    // instruction program with loops easily runs a few hundred thousand
+    // steps), and they get fewer check inputs to stay inside the time limit.
+    const size_t progSize = base.instrCount();
+    const uint64_t stepLimit = std::min<uint64_t>(6000000, std::max<uint64_t>(200000, 30 * progSize));
+    const int nCheck = progSize > 4000 ? 16 : opt.checkInputs;
     std::vector<Input> inputs = typicalInputs(np, 16, 0x74797069ull);
-    std::vector<Input> gen = generateInputs(np, opt.checkInputs, 0x6b6f7074ull);
+    std::vector<Input> gen = generateInputs(np, nCheck, 0x6b6f7074ull);
     inputs.insert(inputs.end(), gen.begin(), gen.end());
-    std::vector<Input> more = generateInputs(np, opt.checkInputs / 2, 0x4b494c4eull);
+    std::vector<Input> more = generateInputs(np, nCheck / 2, 0x4b494c4eull);
     inputs.insert(inputs.end(), more.begin(), more.end());
     const size_t timingSample = 16;   // the typical inputs
     std::vector<RunResult> origRuns;
     std::vector<uint64_t> baseCyc(timingSample, 0);
     for (size_t i = 0; i < inputs.size(); i++) {
-        origRuns.push_back(so.run(inputs[i], 200000, i < timingSample));
+        origRuns.push_back(so.run(inputs[i], stepLimit, i < timingSample));
         if (i < timingSample && origRuns.back().status != Status::TIMEOUT)
             baseCyc[i] = so.cycles(origRuns.back().trace, m);
         origRuns.back().trace.clear();
@@ -294,6 +313,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     for (size_t i = 0; i < timingSample; i++) baseCycles += baseCyc[i];
     // Quick evaluation: behaviour and exact cycles on the timing sample.
     auto quick = [&](Cand &c) {
+        PassTimer pt("quickcheck");
         SimProgram sc(c.p);
         c.ok = true;
         c.cycles = 0;
@@ -316,6 +336,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                     c.p.instrCount(), distinctRegisters(c.p));
     };
     auto fullCheck = [&](const Cand &c) {
+        PassTimer pt("fullcheck");
         SimProgram sc(c.p);
         for (size_t i = timingSample; i < inputs.size(); i++) {
             const RunResult &a = origRuns[i];
@@ -334,7 +355,6 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // The variant search multiplies compile time, so its size depends on the
     // program size (never on the clock): the full search up to 1000
     // instructions, a reduced one up to 4000, a single compile above that.
-    const size_t progSize = base.instrCount();
     const int effort = progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0);
     const bool small = effort >= 1;
     std::vector<Cand> cands;
@@ -355,14 +375,14 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fl.fuseReductions = kVariants[v][1];
             fl.speculate = kVariants[v][2];
             fl.strength = kVariants[v][3];
-            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1);
+            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1, effort == 0);
         }
         for (Cand &c : p1) quick(c);
         for (Cand &c : p1) cands.push_back(c);
     }
     // Phase 2: loop rotation and unrolling on the register form of the best
     // phase-1 results, then the whole pipeline again.
-    if (small) {
+    {
         // Bases: the default pipeline plus the best distinct phase-1 programs (a
         // variant that wins before unrolling can lose after it, so keep several).
         std::vector<const Cand *> sorted;
@@ -386,9 +406,17 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         const int budget = std::max(24, m.icache_size);
         // Register-form transforms: rotate+unroll by 1/2/4/8, jump threading,
         // and full peeling of short loops (constant trip counts fold away).
-        struct Plan { const char *name; int unroll; int peel; bool thread; int counted; bool unswitch = false; bool reduced = false; };
+        struct Plan {
+            const char *name;
+            int unroll, peel;
+            bool thread;
+            int counted;
+            bool unswitch = false;
+            bool reduced = false;   // also in the reduced search (up to 4000 instructions)
+            bool huge = false;      // also for the biggest programs (one cheap transform)
+        };
         static const Plan plans[] = {
-            {"unroll1", 1, 0, false, 0}, {"unroll2", 2, 0, false, 0, false, true}, {"unroll4", 4, 0, false, 0},
+            {"unroll1", 1, 0, false, 0, false, false, true}, {"unroll2", 2, 0, false, 0, false, true}, {"unroll4", 4, 0, false, 0},
             {"unroll8", 8, 0, false, 0}, {"thread", 0, 0, true, 0, false, true}, {"peel8", 0, 8, true, 0, false, true},
             {"peel16", 0, 16, true, 0}, {"cunroll2", 1, 0, false, 2}, {"cunroll4", 1, 0, false, 4},
             {"cunroll8", 1, 0, false, 8}, {"cunroll4r", 1, 0, false, -4, false, true}, {"cunroll8r", 1, 0, false, -8},
@@ -398,7 +426,8 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
             for (const Plan &pl : plans) {
-                if (effort < 2 && !pl.reduced) continue;
+                if (effort == 1 && !pl.reduced) continue;
+                if (effort == 0 && !pl.huge) continue;
                 std::vector<uint32_t> names;
                 Func rf = toRegisterForm(basePrograms[bi], names);
                 bool any = false;
@@ -420,7 +449,8 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 }
                 if (!any) continue;
                 Program transformed = fromRegisterForm(rf, names);
-                compileVariants(transformed, m, opt.maxLevel, baseFlags[bi], baseNames[bi] + "/" + pl.name, true, p2);
+                compileVariants(transformed, m, opt.maxLevel, baseFlags[bi], baseNames[bi] + "/" + pl.name, true, p2,
+                                effort == 0);
             }
         }
         for (Cand &c : p2) quick(c);

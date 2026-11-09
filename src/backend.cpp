@@ -444,22 +444,42 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse) {
         for (int v : nodes) deg[v] = static_cast<int>(nbr[v].size());
         std::vector<char> removed(nv, 0);
         std::vector<int> stack;
+        // Picks: the first node (in `nodes` order) with degree < K; if there is
+        // none, the cheapest spill candidate (cost / (degree + 1), ties by
+        // position). Two ordered sets keep this O(E log n) for big functions.
+        std::vector<int> posOf(nv, -1);
+        for (size_t i = 0; i < nodes.size(); i++) posOf[nodes[i]] = static_cast<int>(i);
+        auto spillKey = [&](int v) { return noSpill[v] ? 1e200 : cost[v] / (deg[v] + 1); };
+        std::set<int> low;                          // positions with degree < K
+        std::set<std::pair<double, int>> high;      // (spill key, position)
+        for (int v : nodes) {
+            if (deg[v] < K) low.insert(posOf[v]);
+            else high.insert({spillKey(v), posOf[v]});
+        }
         size_t left = nodes.size();
         while (left > 0) {
-            int pick = -1;
-            for (int v : nodes) if (!removed[v] && deg[v] < K) { pick = v; break; }
-            if (pick < 0) {
-                double best = 1e300;
-                for (int v : nodes) {
-                    if (removed[v]) continue;
-                    double c = noSpill[v] ? 1e200 : cost[v] / (deg[v] + 1);
-                    if (c < best) { best = c; pick = v; }
-                }
+            int pick;
+            if (!low.empty()) {
+                pick = nodes[*low.begin()];
+                low.erase(low.begin());
+            } else {
+                pick = nodes[high.begin()->second];
+                high.erase(high.begin());
             }
             removed[pick] = 1;
             stack.push_back(pick);
             left--;
-            for (int n : nbr[pick]) if (!removed[n]) deg[n]--;
+            for (int n : nbr[pick]) {
+                if (removed[n]) continue;
+                if (deg[n] >= K) {
+                    high.erase({spillKey(n), posOf[n]});
+                    deg[n]--;
+                    if (deg[n] < K) low.insert(posOf[n]);
+                    else high.insert({spillKey(n), posOf[n]});
+                } else {
+                    deg[n]--;
+                }
+            }
         }
         std::vector<int> repColor(nv, -1);
         std::vector<int> spilled;

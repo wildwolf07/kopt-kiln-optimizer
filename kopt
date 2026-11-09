@@ -3,19 +3,34 @@
 #   kopt IN.kir --machine MACHINE.cfg [--profile PROFILE.prof] -o OUT.kir
 # Runs the compiled optimizer (build with ./build.sh). If it fails for any
 # reason, the input program is written out unchanged, which is always legal.
+#
+# Last-resort guard: the optimizer's effort is sized by program length (never
+# by the clock), so it finishes well inside the limits. Should a run still
+# approach the limit (5 s, or 30 s for the largest programs) on a slow
+# machine, it is stopped and the input is written unchanged instead of
+# missing the limit.
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-if "$DIR/build/kopt-bin" "$@"; then
-    exit 0
-fi
 IN=""
 OUT=""
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -o) OUT="$2"; shift 2 ;;
-        --machine|--profile) shift 2 ;;
-        *) [ -z "$IN" ] && IN="$1"; shift ;;
-    esac
-done
+parse() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -o) OUT="$2"; shift 2 ;;
+            --machine|--profile) shift 2 ;;
+            *) [ -z "$IN" ] && IN="$1"; shift ;;
+        esac
+    done
+}
+parse "$@"
+LIMIT=4.5
+if [ -n "$IN" ] && [ -f "$IN" ] && [ "$(wc -l < "$IN")" -gt 20000 ]; then
+    LIMIT=27
+fi
+if command -v timeout >/dev/null 2>&1; then
+    timeout -s KILL "$LIMIT" "$DIR/build/kopt-bin" "$@" && exit 0
+else
+    "$DIR/build/kopt-bin" "$@" && exit 0
+fi
 if [ -n "$IN" ] && [ -n "$OUT" ] && cp "$IN" "$OUT"; then
     echo "kopt: optimizer failed, wrote the input unchanged" >&2
     exit 0
