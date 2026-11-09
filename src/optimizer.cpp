@@ -584,6 +584,48 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             for (Cand &c : p3) cands.push_back(std::move(c));
         }
     }
+    // Flatten nests of short constant-trip loops: peel the innermost loop away,
+    // recompile, and repeat on the result, so a 4x4x4 nest becomes straight-line
+    // code that GVN and the scheduler can work on. Each step is a candidate; the
+    // simulator (with the icache cost) decides.
+    if (effort == 2 && passEnabled("flatten")) {
+        std::vector<const Cand *> best;
+        for (const Cand &c : cands) if (c.ok) best.push_back(&c);
+        std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        std::vector<std::pair<Program, std::pair<std::string, Flags>>> seeds;
+        for (size_t i = 0; i < std::min<size_t>(3, best.size()); i++)
+            seeds.push_back({best[i]->p, {best[i]->what, best[i]->flags}});
+        // Bounded so compile time stays small whatever the machine's icache.
+        // Deterministic work budget: total instructions compiled by this chain.
+        const int budget = std::min(2048, 16 * std::max(64, m.icache_size));
+        size_t work = 0;
+        const size_t workCap = 12000;
+        std::vector<Cand> flat;
+        for (auto &sd : seeds) {
+            Program cur = sd.first;
+            std::string name = sd.second.first;
+            for (int step = 0; step < 4; step++) {
+                std::vector<uint32_t> names;
+                Func rf = toRegisterForm(cur, names);
+                if (!peelLoops(rf, 16, budget)) break;
+                threadJumps(rf, 12, 256);
+                Program transformed = fromRegisterForm(rf, names);
+                if (transformed.instrCount() > 2500 || work + transformed.instrCount() > workCap) break;
+                work += transformed.instrCount();
+                std::vector<Cand> got;
+                name += "/flat";
+                compileVariants(transformed, m, opt.maxLevel, sd.second.second, name, true, got);
+                if (got.empty()) break;
+                for (Cand &c : got) quick(c);
+                const Cand *pick = nullptr;
+                for (const Cand &c : got) if (c.ok && (!pick || c.cycles < pick->cycles)) pick = &c;
+                if (!pick) break;
+                cur = pick->p;
+                for (Cand &c : got) flat.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : flat) cands.push_back(std::move(c));
+    }
     if (effort == 2 && passEnabled("tracelayout")) {
         std::vector<const Cand *> best;
         for (const Cand &c : cands) if (c.ok) best.push_back(&c);
