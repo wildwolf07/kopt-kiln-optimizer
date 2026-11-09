@@ -23,6 +23,16 @@ bool addressInRange(Func &f, Opnd addr);
 // region above it is free for the optimizer's own spill slots.)
 bool memoryAccessesBelow(Func &f, uint32_t limit);
 
+// Per block, for its load/store instructions in order (at most 64): whether
+// the address provably cannot trap, and which pairs provably touch different
+// words. Computed on SSA; stays valid while the order of memory instructions
+// in each block is kept (SSA destruction only adds copies).
+struct BlockMemInfo {
+    std::vector<char> safe;
+    std::vector<std::vector<char>> disjoint;
+};
+std::vector<BlockMemInfo> memoryFacts(Func &f);
+
 // Compute ranges of loop induction variables (used by every range query).
 void computeIVRanges(Func &f);
 void clearIVRanges();

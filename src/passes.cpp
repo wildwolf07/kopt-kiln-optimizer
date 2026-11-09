@@ -1655,6 +1655,33 @@ bool mustDiffer(const Func &f, const std::vector<DefSite> &ds, Opnd a, Opnd b) {
 
 }  // namespace
 
+std::vector<BlockMemInfo> memoryFacts(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo dom = computeDominators(f);
+    std::vector<BlockMemInfo> out(f.bb.size());
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        BB &B = f.bb[b];
+        if (!B.alive || !dom.reachable(b)) continue;
+        std::vector<Opnd> addrs;
+        for (const Inst &x : B.insts)
+            if (x.op == OP_LOAD || x.op == OP_STORE) addrs.push_back(f.resolve(x.a[0]));
+        if (addrs.empty() || addrs.size() > 64) continue;
+        BlockMemInfo &mi = out[b];
+        const size_t n = addrs.size();
+        mi.safe.assign(n, 0);
+        mi.disjoint.assign(n, std::vector<char>(n, 0));
+        for (size_t i = 0; i < n; i++)
+            mi.safe[i] = addrs[i].isConst ? addrs[i].c < kMemWords
+                                          : rangeAt(f, ds, addrs[i], b, &dom.idom).hi < kMemWords;
+        for (size_t i = 0; i < n; i++)
+            for (size_t j = i + 1; j < n; j++)
+                mi.disjoint[i][j] = mi.disjoint[j][i] = mustDiffer(f, ds, addrs[i], addrs[j]) ? 1 : 0;
+    }
+    return out;
+}
+
 bool gvn(Func &f) {
     f.resolveAll();
     DomInfo d = computeDominators(f);
