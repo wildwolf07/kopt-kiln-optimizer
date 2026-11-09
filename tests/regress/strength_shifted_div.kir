@@ -1,0 +1,20 @@
+func strength_silent(v0)
+entry:
+  eq v9, v0, 1234567
+  and v0, v0, 63
+  mov v1, 0
+  mov v2, 0
+  jmp head
+head:
+  lt v3, v1, v0
+  br v3, body, exit
+body:
+  mov v5, v1
+  add v1, v1, 1
+  div v6, v5, 7
+  mul v4, v5, 7
+  select v7, v9, v6, v4
+  add v2, v2, v7
+  jmp head
+exit:
+  ret v2

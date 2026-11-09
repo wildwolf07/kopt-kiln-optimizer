@@ -1,6 +1,6 @@
 # Demo and judge questions
 
-These answers describe the implementation at `acb68c8`. Recheck them after changes
+These answers describe the `optimizer-integrated` candidate. Recheck them after changes
 to the optimizer. Sample-input speedups and finite testing do not establish a
 hidden-test score or equivalence for every input.
 
@@ -63,7 +63,7 @@ python3 "$KIT/kvalidate" /tmp/demo.kir --against "$KIT/bench/sum_sq.kir" --machi
 
 7. **Why is division by a power of two delicate?** Signed division truncates
    toward zero, while a shift does not implement that for every negative value.
-   The shift rewrite requires a provably non-negative dividend.
+   The shift rewrite requires a provably non-negative dividend. The induction proof must also account for the first increment wrapping, including before the first successful test.
 
 8. **How are large or negative shift amounts handled?** KIR masks the amount to
    five bits. A shift by 33 is a shift by 1; a shift by -1 is a shift by 31.
@@ -118,7 +118,8 @@ python3 "$KIT/kvalidate" /tmp/demo.kir --against "$KIT/bench/sum_sq.kir" --machi
 
 21. **What did the spill-web change do?** Copy-related spilled values can share
     a scratch word, removing unnecessary memory-to-memory copies. Newly created
-    short reload temporaries are protected from being spilled again.
+    short reload temporaries are protected from being spilled again. Nearby uses
+    can reuse a reload; if retention fails to color, lowering retries without reuse.
 
 22. **Why can fusion make a program slower?** It may lengthen a loop-carried
     dependency even while reducing instruction count. Fusion on reductions is
@@ -130,11 +131,12 @@ python3 "$KIT/kvalidate" /tmp/demo.kir --against "$KIT/bench/sum_sq.kir" --machi
 
 24. **Why stop unrolling at bounded factors?** Copies reduce branch overhead but
     grow code and register pressure. The instruction-cache costs and simulation
-    can make a larger unroll lose. Exit checks remain in unrolled copies.
+    can make a larger unroll lose. Ordinary unrolling keeps per-copy exit checks. Counted candidates prove a whole group can execute and retain a scalar remainder.
 
 25. **Do you use profiles?** The CLI accepts and reads the named profile, but
-    this version does not use it. Layout uses loop-nesting estimates, and candidate
-    ranking uses simulated typical inputs. Profile counts never prove semantics.
+    this version does not use it. Initial layout uses loop-nesting estimates; additional layouts use
+    frequencies from fixed simulated traces. Candidate ranking uses simulated
+    typical inputs. Profile counts never prove semantics.
 
 26. **How is output deterministic?** Fixed candidate order, fixed input seeds,
     stable tie handling and no clock-based selection. Timing diagnostics do not
@@ -146,7 +148,9 @@ python3 "$KIT/kvalidate" /tmp/demo.kir --against "$KIT/bench/sum_sq.kir" --machi
     necessary; source timeouts are skipped.
 
 28. **How do you avoid spending too long searching?** Programs above 4,000
-    instructions get the default pipeline rather than the full candidate search.
+    instructions get reduced search. Dense block/register sets and expensive
+    deterministic training traces further reduce effort. Interference graph
+    construction has a fixed edge budget; output selection has no clock cutoff.
     Runtime still needs measurement on the target machine; the threshold alone
     does not guarantee a time bound.
 
@@ -155,7 +159,7 @@ python3 "$KIT/kvalidate" /tmp/demo.kir --against "$KIT/bench/sum_sq.kir" --machi
     machine. They are aggregate ratios, not geometric means. Hidden programs and
     inputs can have different speedups.
 
-30. **What would you improve next?** Spill reload reuse, counted-loop unrolling
-    with a remainder loop, and scheduling across blocks. Each needs independent
-    correctness checks and a before/after cycle comparison; none is claimed here
-    as already implemented.
+30. **What would you improve next?** Scheduling across blocks, stronger pressure-sensitive
+    color choices and broader counted-loop recognition. Reload reuse and counted
+    fast paths are already implemented. Changes need independent correctness
+    evidence and before/after cycle comparisons.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "cfg.h"
 
@@ -152,6 +153,124 @@ bool unrollLoops(Func &f, int factor, int sizeBudget) {
         changed = true;
     }
     if (changed) f.rebuildPreds();
+    return changed;
+}
+
+bool unrollCountedLoops(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget) {
+    if (factor < 2 || sizeBudget <= 0 || f.nvals != static_cast<int>(regNames.size())) return false;
+    // This is register form, not SSA: copying destinations intentionally keeps
+    // the same registers. In particular, do not consume forwarded SSA values.
+    if (f.fwd.size() != regNames.size()) return false;
+    for (int v = 0; v < f.nvals; v++) if (f.fwd[v] != Opnd::val(v)) return false;
+    for (const BB &b : f.bb) if (b.alive && !b.phis.empty()) return false;
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    std::unordered_set<uint32_t> usedNames(regNames.begin(), regNames.end());
+    uint32_t nextName = 0;
+    int added = 0;
+    bool changed = false;
+    for (const LoopInfo::Loop &L : li.loops) {
+        if (L.header == 0 || L.blocks.size() != 2 || L.latches.size() != 1) continue;
+        const int h = L.header, b = L.latches[0];
+        if (b == h || b == 0 || irr[h] || irr[b]) continue;
+        const BB header = f.bb[h], body = f.bb[b];
+        if (header.insts.size() != 2 || header.term().op != OP_BR ||
+            header.term().tgt[0] != b || header.term().tgt[1] == h || header.term().tgt[1] == b ||
+            body.term().op != OP_JMP || body.term().tgt[0] != h ||
+            body.preds.size() != 1 || body.preds[0] != h) continue;
+        const Inst cmp = header.insts[0];
+        if (cmp.op != OP_LT || cmp.n != 2 || cmp.dst < 0 || cmp.a[0].isConst ||
+            header.term().a[0] != Opnd::val(cmp.dst)) continue;
+        const int iv = cmp.a[0].v;
+        const Opnd bound = cmp.a[1];
+        if (cmp.dst == iv || (!bound.isConst && (bound.v == iv || bound.v == cmp.dst))) continue;
+        int ivWrites = 0;
+        uint32_t step = 0;
+        bool invariant = true;
+        for (const Inst &x : body.insts) {
+            if (!bound.isConst && x.dst == bound.v) invariant = false;
+            if (x.dst != iv) continue;
+            ivWrites++;
+            if (x.op != OP_ADD || x.n != 2) continue;
+            if (x.a[0] == Opnd::val(iv) && x.a[1].isConst) step = x.a[1].c;
+            else if (x.a[1] == Opnd::val(iv) && x.a[0].isConst) step = x.a[0].c;
+        }
+        if (!invariant || ivWrites != 1 || step == 0 || step > 0x7FFFFFFFu) continue;
+        const uint64_t offset64 = static_cast<uint64_t>(factor - 1) * step;
+        if (offset64 > 0x7FFFFFFFull) continue;
+        const uint32_t offset = static_cast<uint32_t>(offset64);
+        // Signed MIN + offset, formed with unsigned arithmetic in the compiler.
+        const uint32_t minBound = 0x80000000u + offset;
+        if (bound.isConst && static_cast<int32_t>(bound.c) < static_cast<int32_t>(minBound)) continue;
+        std::vector<int> outside;
+        for (int p : header.preds) if (p != b) outside.push_back(p);
+        if (outside.empty()) continue;
+        // Each copied iteration replaces H's compare/branch by mov c,1 and
+        // omits B's jump. Keep one group jump, a two-instruction group test,
+        // and (for a register bound) a four-instruction entry guard/setup.
+        const uint64_t extra = static_cast<uint64_t>(factor) * body.insts.size() + 3 + (bound.isConst ? 0 : 4);
+        if (extra + header.insts.size() + body.insts.size() > static_cast<uint64_t>(sizeBudget) ||
+            extra > static_cast<uint64_t>(sizeBudget - added)) continue;
+        // KIR register numbers are limited to 999999. Use holes as necessary,
+        // including when the input already contains the maximum legal name.
+        const int need = bound.isConst ? 1 : 2;
+        std::vector<uint32_t> fresh;
+        while (static_cast<int>(fresh.size()) < need && nextName <= 999999) {
+            if (!usedNames.count(nextName)) fresh.push_back(nextName);
+            nextName++;
+        }
+        if (static_cast<int>(fresh.size()) != need) break;
+        for (uint32_t name : fresh) { regNames.push_back(name); usedNames.insert(name); }
+        const Val test = f.newVal();
+        const Opnd limit = bound.isConst ? Opnd::cst(bound.c - offset) : Opnd::val(f.newVal());
+        // Entry guarantees bound >= signed MIN + offset, so limit is the
+        // mathematical bound-offset. If i < limit, then i+k*step < bound for
+        // every k in [0,factor), with no signed wrap before the last body.
+        // The last body's increment MAY wrap: retain it exactly, and test the
+        // resulting i again at G, just as the scalar loop would at H.
+        const int group = static_cast<int>(f.bb.size()), chunk = group + 1;
+        const int entry = bound.isConst ? group : group + 2;
+        auto binary = [](Op op, Val dst, Opnd a, Opnd c) {
+            Inst x; x.op = op; x.dst = dst; x.n = 2; x.a[0] = a; x.a[1] = c; return x;
+        };
+        auto branch = [](Val cond, int t, int e) {
+            Inst x; x.op = OP_BR; x.n = 1; x.a[0] = Opnd::val(cond); x.tgt[0] = t; x.tgt[1] = e; return x;
+        };
+        auto jump = [](int t) { Inst x; x.op = OP_JMP; x.tgt[0] = t; return x; };
+        BB G;
+        G.insts.push_back(binary(OP_LT, test, Opnd::val(iv), limit));
+        G.insts.push_back(branch(test, chunk, h));
+        BB C;
+        for (int k = 0; k < factor; k++) {
+            // Every omitted header would write exactly 1 on this path. Keep
+            // that write even if B reads/clobbers c or c is live after the loop.
+            Inst truth; truth.op = OP_MOV; truth.dst = cmp.dst; truth.n = 1; truth.a[0] = Opnd::cst(1);
+            C.insts.push_back(truth);
+            C.insts.insert(C.insts.end(), body.insts.begin(), body.insts.end() - 1);
+        }
+        C.insts.push_back(jump(group));
+        f.bb.push_back(std::move(G));
+        f.bb.push_back(std::move(C));
+        if (!bound.isConst) {
+            BB V, S;
+            V.insts.push_back(binary(OP_LT, test, bound, Opnd::cst(minBound)));
+            V.insts.push_back(branch(test, h, entry + 1));
+            S.insts.push_back(binary(OP_SUB, limit.v, bound, Opnd::cst(offset)));
+            S.insts.push_back(jump(group));
+            f.bb.push_back(std::move(V));
+            f.bb.push_back(std::move(S));
+        }
+        for (int p : outside) {
+            Inst &t = f.bb[p].term();
+            const int nt = t.op == OP_BR ? 2 : 1;
+            for (int s = 0; s < nt; s++) if (t.tgt[s] == h) t.tgt[s] = entry;
+        }
+        added += static_cast<int>(extra);
+        changed = true;
+        f.rebuildPreds();
+    }
     return changed;
 }
 

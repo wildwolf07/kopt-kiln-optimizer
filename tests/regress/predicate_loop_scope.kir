@@ -1,0 +1,23 @@
+func loop_facts(v0)
+entry:
+  and v0, v0, 7
+  const v1, 0
+  const v2, 0
+  jmp head
+head:
+  lt v3, v1, 8
+  br v3, body, exit
+body:
+  br v0, yes, no
+yes:
+  add v2, v2, v0
+  jmp next
+no:
+  add v2, v2, 100
+  jmp next
+next:
+  xor v0, v0, 1
+  add v1, v1, 1
+  jmp head
+exit:
+  ret v2

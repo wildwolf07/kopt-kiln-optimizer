@@ -17,6 +17,7 @@ struct BackendOptions {
     bool spillToK = false;       // use at most K names, spilling to scratch memory if needed
     bool preSchedule = false;    // also list-schedule on values before register allocation
     int spillReuse = 4;          // a reload serves later uses within this many instructions
+    bool spreadColors = false;  // use spare hardware names to break false dependencies
 };
 
 // True when lowering with spillToK may use the scratch region (all of the

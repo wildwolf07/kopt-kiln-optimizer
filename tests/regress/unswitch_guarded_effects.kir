@@ -1,0 +1,26 @@
+func invariant_effects(v0, v1, v2)
+entry:
+  and v0, v0, 31
+  const v3, 0
+  const v4, 0
+  jmp head
+head:
+  lt v5, v3, v0
+  br v5, body, done
+body:
+  br v1, dangerous, safe
+dangerous:
+  div v6, v3, v2
+  vstore 5, v6
+  add v4, v4, v6
+  jmp next
+safe:
+  vstore 6, v3
+  sub v4, v4, v3
+  jmp next
+next:
+  add v3, v3, 1
+  jmp head
+done:
+  store 10, v4
+  ret v4

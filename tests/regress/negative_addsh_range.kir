@@ -1,0 +1,6 @@
+func negative_shift(v0)
+entry:
+  and v1, v0, 7
+  sub v2, v1, 4
+  addsh v3, 7, v2, 3
+  ret v3

@@ -1,70 +1,82 @@
-# kopt: an optimizer for the Kiln
+# kopt: the Kiln optimizer
 
-`kopt` rewrites a KIR program into one that does exactly the same thing in fewer Kiln cycles. It is an SSA-based optimizing compiler middle and back end written in C++17, with no dependencies.
+A C++17 optimizer for COMP10 “Oxygen Debt”, using SSA analysis, machine-aware
+lowering and deterministic candidate search. No runtime dependencies beyond the
+standard library.
 
-## Build and run
-
-```
+```sh
 ./build.sh
 ./kopt IN.kir --machine MACHINE.cfg [--profile PROFILE.prof] -o OUT.kir
 ```
 
-`build.sh` needs `g++` 11 or newer (or set `CXX=clang++`) and takes a few seconds. `kopt` works from any folder. It writes only `OUT.kir` and exits 0.
+Build with g++ 11 or newer, or `CXX=clang++ ./build.sh`. The executable wrapper
+works from any current directory. Normal execution writes only the named output.
 
-## Results on the starter kit
+## Public benchmark evidence
 
-Cycles on the sample input of all 100 practice programs. The development harness compares observable behaviour against the kit interpreter and checks byte-for-byte determinism for every program/machine pair. The table below records commit `acb68c8`; timings are sample-input cycle totals, not a prediction of hidden-test performance.
+Cycles summed over the 100 kit sample inputs per machine, using the official
+interpreter/timing model. These are aggregate ratios, not geometric means or
+hidden-test predictions. The `optimizer-integrated` candidate combines the
+core at `64574bd`, memory-fact scheduling from `e818222`, and additional tested
+allocation, counted-loop, layout and correctness changes.
 
-| Machine | Cycles before | Cycles after | Speed-up |
-|---|---:|---:|---:|
-| default | 103,671 | 16,527 | 6.27x |
-| few_registers | 202,164 | 25,592 | 7.90x |
-| no_fused | 107,966 | 20,218 | 5.34x |
-| slow_memory | 111,254 | 24,319 | 4.58x |
-| wide_fast | 55,744 | 12,923 | 4.31x |
+| Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
+|---|---:|---:|---:|---:|
+| default | 103,671 | 16,527 | 13,523 | 7.67x |
+| few_registers | 202,164 | 25,592 | 20,971 | 9.64x |
+| no_fused | 107,966 | 20,218 | 16,763 | 6.44x |
+| slow_memory | 111,254 | 24,319 | 19,654 | 5.66x |
+| wide_fast | 55,744 | 12,923 | 9,941 | 5.61x |
 
-The 15 solved examples of the kit: kopt matches or beats 13 of them (for example `branchy_select` 1323 -> 211 cycles, `strength_ladder` 327 -> 223).
+Every program/machine pair is checked against the kit on its sample plus 50
+additional inputs, and optimized twice for determinism. Individual programs can
+get slower; inspect per-program comparisons as well as totals.
 
-## How it stays correct
+## Validation
 
-1. Transformations are designed around the exact arithmetic, trap and effect rules (see `DESIGN.md`, section 5). Finite tests support these arguments but do not prove correctness for every input.
-2. Before writing its output, kopt checks every candidate on 16 typical inputs and checks improving candidates on additional fixed-seed inputs with its C++ port of the reference interpreter (kit-style edge values, special pairs, random and typical inputs). Any difference in the result, trap kind, volatile log or data memory rejects the candidate. If no candidate survives, the input is written unchanged.
-3. Development checks for the recorded snapshot: the kit interpreter on all 100 programs x 5 machines with 50 generated inputs plus the sample input per pair; 2,000 differential fuzz programs (seed 1109) with traps, aliasing, volatile I/O and irreducible control flow; and both saved regressions in `tests/regress`. The separate CI smoke suite is described below.
+Kit-free checks, also available on Ubuntu 22.04/g++ 11 CI:
 
-## Developer tools
+```sh
+python3 tools/smoke.py
+python3 tests/pressure.py
+```
 
-The benchmark, fuzzer and regression tools need the starter kit; set `KIT` to its `Compilers/COMP10` folder. The smoke suite uses only our own fixtures.
+The smoke suite covers arithmetic, loops, guarded division, memory, scratch,
+volatile operations and traps, plus four deliberately corrupted negative
+controls. Dense-pressure tests compare against a separate arithmetic oracle
+and exercise bounded search/graph construction.
 
-| Command | What it does |
-|---|---|
-| `python3 tools/smoke.py` | Kit-free semantic cases, negative controls, determinism, unsupported-instruction checks, and wrapper execution from another folder |
-| `tools/bench.py --machines all` | Optimizes every practice program on every machine, validates with the kit's interpreter, counts cycles, checks determinism |
-| `tools/fuzz.py --count 2000` | Differential fuzzing on random programs and random machines |
-| `tools/regress.py` | Re-runs every past bug in `tests/regress` |
-| `tools/genbig.py loops 100000` | Generates very large programs for timing |
-| `KOPT_VERBOSE=1 ./kopt ...` | Shows every candidate and the one chosen |
-| `./build/kopt-bin --sim P.kir --machine M.cfg --input I.in` | Runs a program and shows where the cycles go |
-
-`DESIGN.md` explains every pass.
-
-## Compatibility checks
-
-GitHub Actions builds on `ubuntu-22.04` using `g++-11`, then compiles with
-`-std=c++17 -O2 -Wall -Wextra -Werror -pedantic` and runs `python3 tools/smoke.py`.
-The smoke suite covers nine programs across five independently written machine
-configurations. It checks hand-calculated results, traps, memory and volatile
-behaviour through differential checks, and rejects four deliberately corrupted
-programs. It fails on strict-mode errors or wrapper fallback. No kit download or
-third-party Python package is needed for that job.
-
-The smoke suite uses our interpreter for differential checks and is not a
-replacement for the independent kit gates. Before merging, run:
+Independent kit checks (the kit is not bundled):
 
 ```sh
 export KIT=/path/to/LLH-26/Compilers/COMP10
 python3 tools/bench.py --machines all --random 50
-python3 tools/fuzz.py --count 2000 --seed 1109
+python3 tools/fuzz.py --count 2000 --seed 1123
+python3 tools/metamorph.py --count 1000 --seed 1124
 python3 tools/regress.py
+CXX=clang++ python3 tests/counted_loops.py --integrated-bin build/kopt-bin
+python3 tests/unswitch_pipeline.py
 ```
 
-For a short demo and questions about the implementation, see [VIVA.md](VIVA.md).
+The fuzzer includes conditional pointer cursors, counted recurrences and
+literal-driven rare inputs. Metamorphic testing renames registers, shuffles
+blocks, changes constants and varies machines. Counted/unswitch tests inspect
+all dumped candidates as well as winners, so fallback cannot mask a bad
+transformation. Regression `.in` files preserve rare arguments that ordinary
+fixed-seed testing can miss.
+
+## Design and diagnostics
+
+[DESIGN.md](DESIGN.md) explains every pass, safety argument and limitation.
+[VIVA.md](VIVA.md) provides a short demonstration and judge questions.
+
+- `KOPT_VERBOSE=1`: candidate cycles and chosen candidate.
+- `KOPT_STRICT=1`: fail on a candidate self-check mismatch.
+- `KOPT_DUMP=DIR`: dump candidates for development.
+- `KOPT_TIMING=1`: diagnostic timings only; never changes selection.
+- `KOPT_DISABLE=PASS`: disable passes for debugging.
+- `./build/kopt-bin --sim P.kir --machine M.cfg --input I.in`: exact cycle breakdown.
+
+Training runs and self-checks are finite safeguards. Transformations still need
+semantic justification, and passing tests cannot guarantee a hidden-test score.
+There is no wall-clock-based choice of output or timed fallback.

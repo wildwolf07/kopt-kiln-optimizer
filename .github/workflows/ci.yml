@@ -20,3 +20,5 @@ jobs:
           g++-11 -std=c++17 -O2 -Wall -Wextra -Werror -pedantic -o build/kopt-bin src/*.cpp
       - name: Check semantics, determinism and command-line entry points
         run: python3 tools/smoke.py
+      - name: Check dense-live-set limits with an independent arithmetic oracle
+        run: python3 tests/pressure.py

@@ -162,8 +162,15 @@ Liveness computeLiveness(Func &f) {
 
 struct Graph {
     std::vector<std::vector<int>> adj;
+    size_t edges = 0;
+    bool exhausted = false;
     void add(int a, int b) {
         if (a == b) return;
+        // Dense live sets can have quadratic interference. Bound construction
+        // before it threatens the judge's memory/time limit; unique names are
+        // always semantically valid in KIR and need no interference graph.
+        if (edges >= 2000000) { exhausted = true; return; }
+        edges++;
         adj[a].push_back(b);
         adj[b].push_back(a);
     }
@@ -180,7 +187,7 @@ struct Allocation {
     int ncolors = 0;
 };
 
-Allocation allocate(Func &f, const Machine &m, bool coalesce) {
+Allocation allocate(Func &f, const Machine &m, bool coalesce, bool spreadColors) {
     const int nv = f.nvals;
     Liveness L = computeLiveness(f);
     Graph g;
@@ -208,6 +215,13 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce) {
                 int movSrc = (x.op == OP_MOV && !x.a[0].isConst) ? x.a[0].v : -1;
                 for (int l : liveList)
                     if (isLive[l] && l != d && l != movSrc) g.add(d, l);
+                if (g.exhausted) {
+                    Allocation unique;
+                    unique.ncolors = nv;
+                    unique.color.resize(nv);
+                    for (int v = 0; v < nv; v++) unique.color[v] = v;
+                    return unique;
+                }
                 if (movSrc >= 0) moves.push_back({d, movSrc, B.freq});
                 if (isLive[d]) { isLive[d] = 0; liveCount--; }
             }
@@ -288,15 +302,23 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce) {
     A.color.assign(nv, -1);
     std::vector<int> repColor(nv, -1);
     std::vector<int> mark;
+    int colorCursor = 0;
+    const int spreadLimit = std::min(32, m.registers);
     for (int i = static_cast<int>(order.size()) - 1; i >= 0; i--) {
         int v = order[i];
-        mark.assign(nbr[v].size() + 2, 0);
+        mark.assign(std::max(nbr[v].size() + 2, static_cast<size_t>(spreadColors ? spreadLimit : 0)), 0);
         for (int n : nbr[v]) {
             int c = repColor[n];
             if (c >= 0 && c < static_cast<int>(mark.size())) mark[c] = 1;
         }
         int c = 0;
         while (mark[c]) c++;
+        if (spreadColors && c < spreadLimit) {
+            for (int j = 0; j < spreadLimit; j++) {
+                int candidate = (colorCursor + j) % spreadLimit;
+                if (!mark[candidate]) { c = candidate; colorCursor = (c + 1) % spreadLimit; break; }
+            }
+        }
         repColor[v] = c;
         A.ncolors = std::max(A.ncolors, c + 1);
     }
@@ -312,7 +334,7 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce) {
 // definition. With at most K names the machine never spills by itself.
 // ---------------------------------------------------------------------------
 
-bool allocateK(Func &f, int K, Allocation &A, int reuse) {
+bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
     std::vector<int> slotOf;          // per value: scratch slot index or -1
     std::vector<char> noSpill;        // short temps created by spilling
     std::vector<int> web;             // spill web: copy-related values that may share a slot
@@ -348,6 +370,7 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse) {
                     int movSrc = (x.op == OP_MOV && !x.a[0].isConst) ? x.a[0].v : -1;
                     for (int l : liveList)
                         if (isLive[l] && l != d && l != movSrc) g.add(d, l);
+                    if (g.exhausted) return false;
                     if (movSrc >= 0) moves.push_back({d, movSrc, B.freq});
                     isLive[d] = 0;
                 }
@@ -483,12 +506,19 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse) {
         }
         std::vector<int> repColor(nv, -1);
         std::vector<int> spilled;
+        int colorCursor = 0;
         for (int i = static_cast<int>(stack.size()) - 1; i >= 0; i--) {
             int v = stack[i];
             std::vector<char> taken(K, 0);
             for (int n : nbr[v]) if (repColor[n] >= 0) taken[repColor[n]] = 1;
             int c = 0;
             while (c < K && taken[c]) c++;
+            if (spreadColors && c < K) {
+                for (int j = 0; j < K; j++) {
+                    int candidate = (colorCursor + j) % K;
+                    if (!taken[candidate]) { c = candidate; colorCursor = (c + 1) % K; break; }
+                }
+            }
             if (c < K) repColor[v] = c;
             else spilled.push_back(v);
         }
@@ -669,30 +699,32 @@ std::vector<int> layoutBlocks(Func &f) {
 
 bool canSpillToScratch(Func &f) { return memoryAccessesBelow(f, kScratchBase); }
 
-void preScheduleFunc(Func &f, const Machine &m);
+void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf);
 
 Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     const bool scratchFree = opt.spillToK && canSpillToScratch(f);
     estimateFrequencies(f);
+    std::vector<BlockMemInfo> memFacts;
+    if (opt.preSchedule) memFacts = memoryFacts(f);
     destructSSA(f);
     // Optional: list-schedule on values before allocation, so independent
     // long-latency results get different registers (in-order issue waits for
     // a register's old value before writing it again).
-    if (opt.preSchedule) preScheduleFunc(f, m);
+    if (opt.preSchedule) preScheduleFunc(f, m, memFacts);
     Allocation A;
     bool haveK = false;
     if (scratchFree) {
         Func backup = f;
         // First with reloads shared inside a block; if the longer temps cannot
         // be coloured, again with one reload per use.
-        haveK = allocateK(f, m.registers, A, opt.spillReuse);
+        haveK = allocateK(f, m.registers, A, opt.spillReuse, opt.spreadColors);
         if (!haveK && opt.spillReuse > 0) {
             f = backup;
-            haveK = allocateK(f, m.registers, A, 0);
+            haveK = allocateK(f, m.registers, A, 0, opt.spreadColors);
         }
         if (!haveK) f = backup;
     }
-    if (!haveK) A = allocate(f, m, opt.coalesce);
+    if (!haveK) A = allocate(f, m, opt.coalesce, opt.spreadColors);
     // Rewrite values to their colors (kept as values for the CFG passes below),
     // and drop copies that became "mov r, r".
     for (BB &B : f.bb) {
@@ -755,7 +787,9 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
 namespace {
 
 // Schedule one block (its last instruction is the terminator and stays last).
-void scheduleBlock(Block &blk, const Machine &m) {
+// mi (pre-allocation scheduling only): facts about the block's memory
+// instructions; each one carries its ordinal in target[1].
+void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullptr) {
     {
         const int n = static_cast<int>(blk.ins.size());
         if (n <= 2) return;
@@ -783,9 +817,15 @@ void scheduleBlock(Block &blk, const Machine &m) {
         int lastEffect = -1;
         std::vector<int> trapLoadsSinceEffect, trapDivsSinceEffect;
         std::vector<int> memOps;   // earlier loads and stores, for the alias rule
+        auto ordOf = [&](const Instr &a) -> int {
+            if (!mi || a.target[1] < 0 || a.target[1] >= static_cast<int>(mi->safe.size())) return -1;
+            return a.target[1];
+        };
         auto mayAlias = [&](const Instr &a, const Instr &b) {
             const Operand &x = a.src[0], &y = b.src[0];
             if (!x.isReg && !y.isReg) return x.v == y.v;
+            const int oa = ordOf(a), ob = ordOf(b);
+            if (oa >= 0 && ob >= 0 && mi->disjoint[oa][ob]) return false;
             return true;
         };
         for (int j = 0; j < body; j++) {
@@ -807,7 +847,8 @@ void scheduleBlock(Block &blk, const Machine &m) {
             }
             const bool isMem = x.op == OP_LOAD || x.op == OP_STORE;
             const bool constAddr = isMem && !x.src[0].isReg && x.src[0].v < kMemWords;
-            const bool memTrap = isMem && !constAddr;
+            const int ord = isMem ? ordOf(x) : -1;
+            const bool memTrap = isMem && !constAddr && !(ord >= 0 && mi->safe[ord]);
             const bool scratchStore = x.op == OP_STORE && constAddr && x.src[0].v >= kScratchBase;
             const bool isEffect = (x.op == OP_STORE && !scratchStore) || x.op == OP_VLOAD ||
                                   x.op == OP_VSTORE || x.op == OP_TRAP;
@@ -926,13 +967,15 @@ void scheduleProgram(Program &p, const Machine &m) {
 }
 
 // Pre-allocation scheduling: the same list scheduler, run on value numbers.
-// Each instruction carries its index in target[0] so the order maps back.
-void preScheduleFunc(Func &f, const Machine &m) {
-    for (BB &B : f.bb) {
+// Each instruction carries its index in target[0] so the order maps back, and
+// memory instructions carry their ordinal in target[1] for the memory facts.
+void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf) {
+    for (int bi = 0; bi < static_cast<int>(f.bb.size()); bi++) {
+        BB &B = f.bb[bi];
         if (!B.alive || B.insts.size() <= 2) continue;
-        Program tmp;
-        tmp.blocks.resize(1);
-        Block &w = tmp.blocks[0];
+        const BlockMemInfo *mi = bi < static_cast<int>(mf.size()) && !mf[bi].safe.empty() ? &mf[bi] : nullptr;
+        Block w;
+        int ord = 0;
         for (size_t i = 0; i < B.insts.size(); i++) {
             const Inst &x = B.insts[i];
             Instr y;
@@ -943,9 +986,30 @@ void preScheduleFunc(Func &f, const Machine &m) {
             for (int a = 0; a < x.n; a++)
                 y.src[a] = x.a[a].isConst ? Operand::imm(x.a[a].c) : Operand::reg(static_cast<uint32_t>(x.a[a].v));
             y.target[0] = static_cast<int>(i);
+            y.target[1] = (x.op == OP_LOAD || x.op == OP_STORE) ? ord++ : -1;
             w.ins.push_back(y);
         }
-        scheduleProgram(tmp, m);
+        if (mi && ord != static_cast<int>(mi->safe.size())) mi = nullptr;   // order changed: no facts
+        // Windows of 96 keep long blocks linear (as in scheduleProgram).
+        const int window = 96;
+        const int n = static_cast<int>(w.ins.size());
+        if (n <= window + 1) {
+            scheduleBlock(w, m, mi);
+        } else {
+            const int body = n - 1;
+            for (int start = 0; start < body; start += window) {
+                const int end = std::min(body, start + window);
+                Block part;
+                part.ins.assign(w.ins.begin() + start, w.ins.begin() + end);
+                Instr stop;
+                stop.op = OP_RET;
+                stop.nsrc = 1;
+                stop.src[0] = Operand::imm(0);
+                part.ins.push_back(stop);
+                scheduleBlock(part, m, mi);
+                std::copy(part.ins.begin(), part.ins.end() - 1, w.ins.begin() + start);
+            }
+        }
         std::vector<Inst> out;
         out.reserve(B.insts.size());
         for (const Instr &y : w.ins) out.push_back(B.insts[static_cast<size_t>(y.target[0])]);

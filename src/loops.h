@@ -48,6 +48,8 @@ bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs);
 // Unswitch loops on branches whose condition the loop never writes.
 bool unswitchLoops(Func &f, int sizeBudget);
 
+bool unrollCountedLoops(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget);
+
 bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget,
                    bool chainRemainder = false);
 

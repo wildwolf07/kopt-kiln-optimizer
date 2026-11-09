@@ -171,6 +171,67 @@ struct Cand {
     bool ok = false;
 };
 
+// A deterministic layout hint from executions on our fixed training inputs.
+// Only block order and label indices change; all instructions remain intact.
+Program traceLayout(const Program &p, const std::vector<Input> &inputs, bool chains) {
+    const int nb = static_cast<int>(p.blocks.size());
+    if (nb < 2) return p;
+    std::vector<int> blockOf;
+    std::vector<uint32_t> start(nb);
+    for (int b = 0; b < nb; b++) {
+        start[b] = static_cast<uint32_t>(blockOf.size());
+        blockOf.insert(blockOf.end(), p.blocks[b].ins.size(), b);
+    }
+    std::vector<uint64_t> frequency(nb, 0);
+    std::vector<std::unordered_map<int, uint64_t>> edges(nb);
+    SimProgram sim(p);
+    for (size_t i = 0; i < std::min<size_t>(16, inputs.size()); i++) {
+        const RunResult r = sim.run(inputs[i], 200000, true);
+        if (r.status == Status::TIMEOUT) continue;
+        int previous = -1;
+        for (uint32_t ip : r.trace) {
+            const int b = blockOf[ip];
+            if (ip != start[b]) continue;
+            frequency[b]++;
+            if (previous >= 0) edges[previous][b]++;
+            previous = b;
+        }
+    }
+    std::vector<int> order, index(nb, -1);
+    std::vector<char> used(nb, 0);
+    int b = 0;
+    while (static_cast<int>(order.size()) < nb) {
+        index[b] = static_cast<int>(order.size());
+        order.push_back(b); used[b] = 1;
+        int next = -1;
+        uint64_t weight = 0;
+        if (chains) {
+            const Instr &t = p.blocks[b].ins.back();
+            const int ns = t.op == OP_BR ? 2 : (t.op == OP_JMP ? 1 : 0);
+            for (int i = 0; i < ns; i++) {
+                const int s = t.target[i];
+                const auto it = edges[b].find(s);
+                const uint64_t count = it == edges[b].end() ? 0 : it->second;
+                if (!used[s] && count > weight) { next = s; weight = count; }
+            }
+        }
+        if (next < 0) for (int s = 0; s < nb; s++)
+            if (!used[s] && (next < 0 || frequency[s] > frequency[next])) next = s;
+        if (next < 0) break;
+        b = next;
+    }
+    Program out;
+    out.name = p.name; out.params = p.params;
+    for (int old : order) {
+        Block block = p.blocks[old];
+        Instr &t = block.ins.back();
+        if (t.op == OP_JMP || t.op == OP_BR) t.target[0] = index[t.target[0]];
+        if (t.op == OP_BR) t.target[1] = index[t.target[1]];
+        out.blocks.push_back(std::move(block));
+    }
+    return out;
+}
+
 // Optimize `in` with the SSA pipeline and lower it; with both register
 // allocators when the plain one needs more names than the machine has.
 void compileVariants(const Program &in, const Machine &m, int level, const Flags &fl, const std::string &tag,
@@ -185,11 +246,13 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     // different registers); and, when the program needs more than K names and
     // scratch is free, K names with spills to scratch (+K, +KS).
     std::vector<std::string> texts;
-    auto emit = [&](bool pre, bool k, const char *suffix) -> const Program * {
+    auto emit = [&](bool pre, bool k, const char *suffix, bool spread = false) -> const Program * {
+        if (pre && !passEnabled("preschedule")) return nullptr;
         Func g = f;
         BackendOptions bo;
         bo.preSchedule = pre;
         bo.spillToK = k;
+        bo.spreadColors = spread;
         if (plainOnly) bo.spillReuse = 0;   // biggest programs: one allocation attempt
         Cand c;
         {
@@ -215,6 +278,10 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     const bool preOverK = pre && distinctRegisters(*pre) > m.registers;
     if (scratch && overK) emit(false, true, "+K");
     if (scratch && (overK || preOverK)) emit(true, true, "+KS");
+    if (passEnabled("spreadcolors")) {
+        emit(true, false, "+spread", true);
+        if (scratch && (overK || preOverK)) emit(true, true, "+Kspread", true);
+    }
 }
 
 }  // namespace
@@ -357,7 +424,15 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // The variant search multiplies compile time, so its size depends on the
     // program size (never on the clock): the full search up to 1000
     // instructions, a reduced one up to 4000, a single compile above that.
-    const int effort = progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0);
+    const bool dense = base.blocks.size() > 256 || distinctRegisters(base) > 256;
+    uint64_t trainingWork = 0;
+    for (size_t i = 0; i < timingSample; i++)
+        trainingWork += origRuns[i].status == Status::TIMEOUT ? stepLimit : origRuns[i].steps;
+    // Execution counts on fixed inputs are deterministic. Expensive nested
+    // loops get fewer recompilations without using a wall-clock cutoff.
+    int effort = dense ? 0 : (progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0));
+    if (trainingWork > 1000000) effort = 0;
+    else if (trainingWork > 300000) effort = std::min(effort, 1);
     const bool small = effort >= 1;
     std::vector<Cand> cands;
     // Phase 1: the SSA pipeline, in a few flavours.
@@ -416,6 +491,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             bool unswitch = false;
             bool reduced = false;   // also in the reduced search (up to 4000 instructions)
             bool huge = false;      // also for the biggest programs (one cheap transform)
+            bool headCounted = false;
         };
         static const Plan plans[] = {
             {"unroll1", 1, 0, false, 0, false, false, true}, {"unroll2", 2, 0, false, 0, false, true}, {"unroll4", 4, 0, false, 0},
@@ -424,6 +500,9 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             {"cunroll8", 1, 0, false, 8}, {"cunroll4r", 1, 0, false, -4, false, true}, {"cunroll8r", 1, 0, false, -8},
             {"unswitch", 0, 0, false, 0, true, true}, {"unswitch+peel16", 0, 16, true, 0, true},
             {"unswitch+unroll4", 4, 0, false, 0, true},
+            {"counted2", 0, 0, false, 2, false, false, false, true},
+            {"counted4", 0, 0, false, 4, false, false, false, true},
+            {"counted8", 0, 0, false, 8, false, false, false, true},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
@@ -433,6 +512,10 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 std::vector<uint32_t> names;
                 Func rf = toRegisterForm(basePrograms[bi], names);
                 bool any = false;
+                if (pl.headCounted) {
+                    if (!unrollCountedLoops(rf, names, pl.counted, budget)) continue;
+                    any = true;
+                }
                 if (pl.unswitch) {
                     if (!unswitchLoops(rf, 2 * budget)) continue;
                     any = true;
@@ -500,6 +583,24 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             for (Cand &c : p3) quick(c);
             for (Cand &c : p3) cands.push_back(std::move(c));
         }
+    }
+    if (effort == 2 && passEnabled("tracelayout")) {
+        std::vector<const Cand *> best;
+        for (const Cand &c : cands) if (c.ok) best.push_back(&c);
+        std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        std::vector<Cand> layouts;
+        for (size_t i = 0; i < std::min<size_t>(8, best.size()); i++) {
+            for (bool chains : {true, false}) {
+                Cand c;
+                c.p = traceLayout(best[i]->p, inputs, chains);
+                if (printProgram(c.p) == printProgram(best[i]->p)) continue;
+                c.what = best[i]->what + (chains ? "/trace" : "/hot");
+                c.flags = best[i]->flags;
+                quick(c);
+                layouts.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : layouts) cands.push_back(std::move(c));
     }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {

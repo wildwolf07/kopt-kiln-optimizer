@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(KIT))
 import kirlib as K  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BIN = os.environ.get("KOPT_BIN", os.path.join(ROOT, "build", "kopt-bin"))
 bad = 0
 files = sorted(glob.glob(os.path.join(ROOT, "tests", "regress", "*.kir")))
 for f in files:
@@ -24,7 +25,7 @@ for f in files:
     mc = K.load_machine(cfg)
     with tempfile.TemporaryDirectory() as td:
         out = os.path.join(td, "out.kir")
-        p = subprocess.run([os.path.join(ROOT, "build", "kopt-bin"), f, "--machine", cfg, "-o", out],
+        p = subprocess.run([BIN, f, "--machine", cfg, "-o", out],
                            capture_output=True, text=True, env=dict(os.environ, KOPT_STRICT="1"))
         if p.returncode != 0:
             print("FAIL %s: %s" % (os.path.basename(f), p.stderr.strip()[-200:]))
@@ -33,7 +34,11 @@ for f in files:
         orig, opt = K.load_program(f), K.load_program(out)
         K.check_machine_features(opt, mc)
         c0, c1 = K.compile_program(orig), K.compile_program(opt)
-        for inp in K.generate_inputs(len(orig.params), 400, 99):
+        inputs = K.generate_inputs(len(orig.params), 400, 99)
+        sample = f[:-4] + ".in"
+        if os.path.exists(sample):
+            inputs.insert(0, K.load_input(sample, len(orig.params)))
+        for inp in inputs:
             a = K.execute(c0, inp.args, inp.segments, inp.vin, 50000)
             if a.status == "TIMEOUT":
                 continue

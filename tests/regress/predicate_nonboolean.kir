@@ -1,0 +1,12 @@
+func truthy(v0)
+entry:
+  br v0, yes, no
+yes:
+  add v1, v0, 10
+  select v2, v0, v1, 0
+  jmp join
+no:
+  mov v2, 0
+  jmp join
+join:
+  ret v2

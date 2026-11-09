@@ -286,6 +286,10 @@ void computeIVRanges(Func &f) {
                     Opnd X = f.resolve(cmp->a[0]), N = f.resolve(cmp->a[1]);
                     bool xIsP = !X.isConst && X.v == p.dst, xIsNext = X == next;
                     if (!xIsP && !xIsNext) continue;
+                    // A post-increment test observes the wrapped result on the
+                    // very first iteration. Its guard cannot establish a
+                    // nonnegative recurrence if init+step already overflows.
+                    if (xIsNext && ri.hi + c >= 0x80000000ull) continue;
                     if (!inL(t.tgt[0]) || inL(t.tgt[1])) continue;   // true must stay in the loop
                     if (!N.isConst) {
                         const DefSite &nd = ds[N.v];
@@ -440,7 +444,8 @@ SR transfer(const Inst &x, const std::function<SR(int)> &R) {
     case OP_ADDSH: {
         SR a = A(0), b = A(1);
         if (b.lo < -65536 || b.hi > 65536 || x.k > 15) return SR::full();
-        return clampSR(a.lo + (b.lo << x.k), a.hi + (b.hi << x.k));
+        const int64_t scale = 1LL << x.k;
+        return clampSR(a.lo + b.lo * scale, a.hi + b.hi * scale);
     }
     case OP_AND: {
         SR a = A(0), b = A(1);
@@ -1654,6 +1659,33 @@ bool mustDiffer(const Func &f, const std::vector<DefSite> &ds, Opnd a, Opnd b) {
 }
 
 }  // namespace
+
+std::vector<BlockMemInfo> memoryFacts(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo dom = computeDominators(f);
+    std::vector<BlockMemInfo> out(f.bb.size());
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        BB &B = f.bb[b];
+        if (!B.alive || !dom.reachable(b)) continue;
+        std::vector<Opnd> addrs;
+        for (const Inst &x : B.insts)
+            if (x.op == OP_LOAD || x.op == OP_STORE) addrs.push_back(f.resolve(x.a[0]));
+        if (addrs.empty() || addrs.size() > 64) continue;
+        BlockMemInfo &mi = out[b];
+        const size_t n = addrs.size();
+        mi.safe.assign(n, 0);
+        mi.disjoint.assign(n, std::vector<char>(n, 0));
+        for (size_t i = 0; i < n; i++)
+            mi.safe[i] = addrs[i].isConst ? addrs[i].c < kMemWords
+                                          : rangeAt(f, ds, addrs[i], b, &dom.idom).hi < kMemWords;
+        for (size_t i = 0; i < n; i++)
+            for (size_t j = i + 1; j < n; j++)
+                mi.disjoint[i][j] = mi.disjoint[j][i] = mustDiffer(f, ds, addrs[i], addrs[j]) ? 1 : 0;
+    }
+    return out;
+}
 
 bool gvn(Func &f) {
     f.resolveAll();

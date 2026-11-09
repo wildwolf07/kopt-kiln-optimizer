@@ -27,6 +27,7 @@ import kirlib as K  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 KOPT = os.path.join(ROOT, "kopt")
+KOPT_BIN = os.environ.get("KOPT_BIN", os.path.join(ROOT, "build", "kopt-bin"))
 FAILDIR = os.path.join(ROOT, "tests", "fuzz_failures")
 
 BIN = ["add", "sub", "mul", "and", "or", "xor", "shl", "shr", "lt", "eq"]
@@ -301,7 +302,7 @@ def one(args):
         except K.KirError as e:
             return ("BADGEN", idx, str(e), src, mc)
         env = dict(os.environ, KOPT_STRICT="1")
-        p = subprocess.run([os.path.join(ROOT, "build", "kopt-bin"), pin, "--machine", pm, "-o", pout],
+        p = subprocess.run([KOPT_BIN, pin, "--machine", pm, "-o", pout],
                            capture_output=True, text=True, timeout=30, env=env)
         if p.returncode != 0:
             return ("KOPT-EXIT", idx, p.stderr[-400:], src, mc)

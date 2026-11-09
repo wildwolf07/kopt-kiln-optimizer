@@ -1,0 +1,13 @@
+func sibling(v0, v1)
+entry:
+  eq v2, v0, 1234567
+  br v2, yes, no
+yes:
+  div v3, v1, 7
+  select v4, v2, v3, 0
+  jmp join
+no:
+  select v4, v0, v0, 12
+  jmp join
+join:
+  ret v4
