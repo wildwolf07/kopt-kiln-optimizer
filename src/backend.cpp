@@ -3,6 +3,7 @@
 #include "backend.h"
 
 #include <algorithm>
+#include <iterator>
 #include <cmath>
 #include <set>
 #include <unordered_map>
@@ -169,7 +170,7 @@ struct Graph {
         // Dense live sets can have quadratic interference. Bound construction
         // before it threatens the judge's memory/time limit; unique names are
         // always semantically valid in KIR and need no interference graph.
-        if (edges >= 2000000) { exhausted = true; return; }
+        if (edges >= 8000000) { exhausted = true; return; }
         edges++;
         adj[a].push_back(b);
         adj[b].push_back(a);
@@ -247,23 +248,31 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce, bool spreadColors)
         while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
         return x;
     };
-    std::vector<std::unordered_set<int>> nbr(nv);
-    for (int v = 0; v < nv; v++)
-        if (used[v]) nbr[v].insert(g.adj[v].begin(), g.adj[v].end());
+    // Neighbour lists as sorted vectors (hash sets cost several times the
+    // memory on dense 100k-instruction functions).
+    std::vector<std::vector<int>> nbr = std::move(g.adj);
+    auto has = [&](int a, int b) { return std::binary_search(nbr[a].begin(), nbr[a].end(), b); };
+    auto replaceIn = [&](int n, int from, int to) {
+        std::vector<int> &l = nbr[n];
+        auto it = std::lower_bound(l.begin(), l.end(), from);
+        if (it != l.end() && *it == from) l.erase(it);
+        auto jt = std::lower_bound(l.begin(), l.end(), to);
+        if (jt == l.end() || *jt != to) l.insert(jt, to);
+    };
     if (coalesce) {
         std::stable_sort(moves.begin(), moves.end(), [](const Move &a, const Move &b) { return a.w > b.w; });
         for (const Move &mv : moves) {
             int a = find(mv.a), b = find(mv.b);
             // Parameters interfere pairwise, so two of them are never merged.
-            if (a == b || nbr[a].count(b)) continue;
+            if (a == b || has(a, b)) continue;
             if (nbr[a].size() < nbr[b].size()) std::swap(a, b);
             parent[b] = a;
-            for (int n : nbr[b]) {
-                nbr[n].erase(b);
-                nbr[n].insert(a);
-                nbr[a].insert(n);
-            }
-            nbr[b].clear();
+            std::vector<int> merged;
+            merged.reserve(nbr[a].size() + nbr[b].size());
+            std::set_union(nbr[a].begin(), nbr[a].end(), nbr[b].begin(), nbr[b].end(), std::back_inserter(merged));
+            for (int n : nbr[b]) replaceIn(n, b, a);
+            nbr[a].swap(merged);
+            std::vector<int>().swap(nbr[b]);
         }
     }
     // Smallest-last ordering, then greedy coloring.
@@ -385,6 +394,8 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
             for (int l : liveList) isLive[l] = 0;
         }
         g.finish();
+        // Reject before building the more expensive web/hash representations.
+        if (g.edges > 1500000) return false;
         if (iter == 0) {
             // Spill webs: copy-related values that never interfere may live in one
             // scratch word, so a copy between two spilled values disappears.
@@ -414,20 +425,24 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
             for (int i = 0; i < nv; i++) web[i] = wfind(i);
             // Values whose whole life is a few instructions inside one block gain
             // nothing from spilling (the reload would be just as long).
+            std::vector<int> liveOutStamp(nv, -1);
             for (BB &B : f.bb) {
                 if (!B.alive) continue;
                 std::unordered_map<int, int> defAt;
-                for (int i = 0; i < static_cast<int>(B.insts.size()); i++)
+                std::unordered_map<int, int> lastUse;
+                const int block = static_cast<int>(&B - &f.bb[0]);
+                for (int u : L.liveOut[block]) liveOutStamp[u] = block;
+                for (int i = 0; i < static_cast<int>(B.insts.size()); i++) {
                     if (B.insts[i].dst >= 0) defAt[B.insts[i].dst] = i;
+                    for (int a = 0; a < B.insts[i].n; a++)
+                        if (!B.insts[i].a[a].isConst) lastUse[B.insts[i].a[a].v] = i;
+                }
                 for (auto &kv : defAt) {
                     int v = kv.first;
-                    bool liveOut = false;
-                    for (int u : L.liveOut[&B - &f.bb[0]]) if (u == v) { liveOut = true; break; }
-                    if (liveOut) continue;
+                    if (liveOutStamp[v] == block) continue;
                     int last = kv.second;
-                    for (int i = kv.second + 1; i < static_cast<int>(B.insts.size()); i++)
-                        for (int a = 0; a < B.insts[i].n; a++)
-                            if (!B.insts[i].a[a].isConst && B.insts[i].a[a].v == v) last = i;
+                    const auto use = lastUse.find(v);
+                    if (use != lastUse.end()) last = std::max(last, use->second);
                     if (last - kv.second <= 2 && wfind(v) == v && members[v].size() <= 1) noSpill[v] = 1;
                 }
             }
@@ -442,6 +457,8 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
             while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
             return x;
         };
+        // Per-class neighbour sets cost far more memory than the edge lists;
+        // very dense functions keep the plain allocation instead.
         std::vector<std::unordered_set<int>> nbr(nv);
         for (int v = 0; v < nv; v++) if (used[v]) nbr[v].insert(g.adj[v].begin(), g.adj[v].end());
         std::stable_sort(moves.begin(), moves.end(), [](const Move &a, const Move &b) { return a.w > b.w; });
@@ -537,13 +554,44 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
             if (noSpill[r]) return false;           // cannot make progress
             spillRep[r] = 1;
         }
-        for (int v = 0; v < nv; v++) {
-            if (!used[v] || !spillRep[find(v)]) continue;
-            int w = web[v];
-            if (webSlot[w] < 0) {
-                if (nextSlot >= maxSlots) return false;
-                webSlot[w] = nextSlot++;
+        // Webs that are never live at the same time share a slot (greedy
+        // colouring over the interference graph of their members). A slot then
+        // always holds the one web that is live, exactly as a register would.
+        {
+            // A web goes to scratch when any member's class is spilled; then
+            // every member of the web (spilled class or not) uses the slot.
+            std::vector<char> webSpilled(nv, 0);
+            for (int v = 0; v < nv; v++)
+                if (used[v] && spillRep[find(v)]) webSpilled[web[v]] = 1;
+            std::vector<int> webs;
+            std::vector<std::vector<int>> members(nv);
+            for (int v = 0; v < nv; v++) {
+                if (!used[v] || noSpill[v] || !webSpilled[web[v]]) continue;
+                const int w = web[v];
+                if (members[w].empty()) webs.push_back(w);
+                members[w].push_back(v);
             }
+            for (int v = 0; v < nv; v++)   // a spilled member that is noSpill still needs its web's slot listed
+                if (used[v] && spillRep[find(v)] && members[web[v]].empty()) { webs.push_back(web[v]); members[web[v]].push_back(v); }
+            std::vector<int> color(nv, -1);
+            int ncol = 0;
+            std::vector<int> mark;
+            for (int w : webs) {
+                mark.assign(static_cast<size_t>(ncol) + 1, 0);
+                for (int v : members[w])
+                    for (int u : g.adj[v]) {
+                        if (!used[u] || !webSpilled[web[u]] || web[u] == w) continue;
+                        const int cu = color[web[u]];
+                        if (cu >= 0) mark[static_cast<size_t>(cu)] = 1;
+                    }
+                int c = 0;
+                while (c < ncol && mark[static_cast<size_t>(c)]) c++;
+                color[w] = c;
+                if (c == ncol) ncol++;
+            }
+            if (nextSlot + ncol > maxSlots) return false;
+            for (int w : webs) webSlot[w] = nextSlot + color[w];
+            nextSlot += ncol;
         }
         for (int v = 0; v < nv; v++) {
             if (!used[v] || noSpill[v]) continue;
@@ -699,7 +747,7 @@ std::vector<int> layoutBlocks(Func &f) {
 
 bool canSpillToScratch(Func &f) { return memoryAccessesBelow(f, kScratchBase); }
 
-void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf);
+void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf, bool pressure);
 
 // Copy a tiny return block (at most 3 instructions) into each block that
 // jumps to it: the jump and its taken-branch fence disappear. Then fold
@@ -813,7 +861,7 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     // Optional: list-schedule on values before allocation, so independent
     // long-latency results get different registers (in-order issue waits for
     // a register's old value before writing it again).
-    if (opt.preSchedule) preScheduleFunc(f, m, memFacts);
+    if (opt.preSchedule) preScheduleFunc(f, m, memFacts, opt.pressureSchedule);
     Allocation A;
     bool haveK = false;
     if (scratchFree) {
@@ -894,7 +942,8 @@ namespace {
 // Schedule one block (its last instruction is the terminator and stays last).
 // mi (pre-allocation scheduling only): facts about the block's memory
 // instructions; each one carries its ordinal in target[1].
-void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullptr) {
+void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullptr, bool pressure = false,
+                   const std::vector<int> *exported = nullptr) {
     {
         const int n = static_cast<int>(blk.ins.size());
         if (n <= 2) return;
@@ -1001,6 +1050,37 @@ void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullpt
         std::vector<Instr> out;
         out.reserve(n);
         std::vector<int> remaining = npred;
+        // This changes priorities only. All register, memory, trap and effect
+        // edges are identical to the original scheduler. Count operand uses
+        // through the terminator; repeated sources die only after their last
+        // occurrence. A sentinel use preserves values needed after this block
+        // or scheduling window. Correctness still follows from dependencies.
+        std::unordered_map<uint32_t, int> uses;
+        std::unordered_set<uint32_t> live, defined;
+        if (pressure) for (const Instr &x : blk.ins) {
+            for (int a = 0; a < x.nsrc; a++) if (x.src[a].isReg) {
+                uses[x.src[a].v]++;
+                if (!defined.count(x.src[a].v)) live.insert(x.src[a].v);
+            }
+            if (hasDest(x.op)) defined.insert(x.dst);
+        }
+        if (pressure && exported) for (int r : *exported) {
+            uses[static_cast<uint32_t>(r)]++;
+            if (!defined.count(static_cast<uint32_t>(r))) live.insert(static_cast<uint32_t>(r));
+        }
+        auto delta = [&](const Instr &x) {
+            int change = hasDest(x.op) && !live.count(x.dst) ? 1 : 0;
+            for (int a = 0; a < x.nsrc; a++) {
+                if (!x.src[a].isReg) continue;
+                const uint32_t r = x.src[a].v;
+                bool first = true; int occurrences = 0;
+                for (int z = 0; z < x.nsrc; z++) if (x.src[z].isReg && x.src[z].v == r) {
+                    occurrences++; if (z < a) first = false;
+                }
+                if (first && uses[r] == occurrences && !(hasDest(x.op) && x.dst == r)) change--;
+            }
+            return change;
+        };
         while (!avail.empty()) {
             int best = -1;
             long bestT = 0;
@@ -1019,7 +1099,11 @@ void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullpt
                 }
                 bool mem = isMemOp(x.op);
                 if (t == last && (used >= m.issue_width || (mem && memused >= m.mem_ports))) t++;
-                if (best < 0 || t < bestT || (t == bestT && (height[j] > height[best] || (height[j] == height[best] && j < best)))) {
+                const bool constrained = pressure && live.size() >= static_cast<size_t>(std::max(1, m.registers - 1));
+                const int rank = constrained ? delta(x) : 0;
+                const int bestRank = constrained && best >= 0 ? delta(blk.ins[best]) : 0;
+                if (best < 0 || t < bestT || (t == bestT && (rank < bestRank ||
+                    (rank == bestRank && (height[j] > height[best] || (height[j] == height[best] && j < best)))))) {
                     best = j;
                     bestT = t;
                 }
@@ -1031,6 +1115,11 @@ void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullpt
             last = bestT;
             doneAt[best] = bestT;
             if (hasDest(x.op)) ready[x.dst] = bestT + m.latency(x.op);
+            if (pressure) {
+                for (int a = 0; a < x.nsrc; a++) if (x.src[a].isReg)
+                    if (--uses[x.src[a].v] == 0) live.erase(x.src[a].v);
+                if (hasDest(x.op)) live.insert(x.dst);
+            }
             scheduled[best] = 1;
             out.push_back(x);
             avail.erase(std::find(avail.begin(), avail.end(), best));
@@ -1074,7 +1163,9 @@ void scheduleProgram(Program &p, const Machine &m) {
 // Pre-allocation scheduling: the same list scheduler, run on value numbers.
 // Each instruction carries its index in target[0] so the order maps back, and
 // memory instructions carry their ordinal in target[1] for the memory facts.
-void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf) {
+void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf, bool pressure) {
+    Liveness live;
+    if (pressure) live = computeLiveness(f);
     for (int bi = 0; bi < static_cast<int>(f.bb.size()); bi++) {
         BB &B = f.bb[bi];
         if (!B.alive || B.insts.size() <= 2) continue;
@@ -1099,9 +1190,24 @@ void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> 
         const int window = 96;
         const int n = static_cast<int>(w.ins.size());
         if (n <= window + 1) {
-            scheduleBlock(w, m, mi);
+            scheduleBlock(w, m, mi, pressure, pressure ? &live.liveOut[bi] : nullptr);
         } else {
             const int body = n - 1;
+            std::vector<std::vector<int>> boundary;
+            if (pressure) {
+                boundary.resize((body + window - 1) / window);
+                std::unordered_set<int> future(live.liveOut[bi].begin(), live.liveOut[bi].end());
+                for (int a = 0; a < w.ins.back().nsrc; a++)
+                    if (w.ins.back().src[a].isReg) future.insert(static_cast<int>(w.ins.back().src[a].v));
+                for (int i = body - 1; i >= 0; i--) {
+                    if (i == body - 1 || (i + 1) % window == 0)
+                        boundary[i / window].assign(future.begin(), future.end());
+                    const Instr &x = w.ins[i];
+                    if (hasDest(x.op)) future.erase(static_cast<int>(x.dst));
+                    for (int a = 0; a < x.nsrc; a++)
+                        if (x.src[a].isReg) future.insert(static_cast<int>(x.src[a].v));
+                }
+            }
             for (int start = 0; start < body; start += window) {
                 const int end = std::min(body, start + window);
                 Block part;
@@ -1111,7 +1217,7 @@ void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> 
                 stop.nsrc = 1;
                 stop.src[0] = Operand::imm(0);
                 part.ins.push_back(stop);
-                scheduleBlock(part, m, mi);
+                scheduleBlock(part, m, mi, pressure, pressure ? &boundary[start / window] : nullptr);
                 std::copy(part.ins.begin(), part.ins.end() - 1, w.ins.begin() + start);
             }
         }

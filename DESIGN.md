@@ -10,8 +10,11 @@ Sources: the official `KIR_SPEC.md` and `kirlib.py` supplied with COMP10; Cytron
 et al. for SSA, Cooper–Harvey–Kennedy for dominators, Wegman–Zadeck for SCCP,
 Chaitin and Briggs–Cooper–Torczon for allocation/coalescing, and standard LICM,
 value-range and list-scheduling techniques. For the scheduling/allocation
-tradeoff, see Shobaki, Shaw and Riddle,
+tradeoff, see Shobaki, Shawabkeh and Abu Rmaileh,
 [Preallocation instruction scheduling with register pressure minimization](https://scholars.csus.edu/esploro/outputs/journalArticle/Preallocation-instruction-scheduling-with-register-pressure/99257888392901671).
+Tree ordering also uses the register-need idea described by Appel and Supowit,
+[Generalizations of the Sethi-Ullman algorithm for register allocation](https://collaborate.princeton.edu/en/publications/generalizations-of-the-sethiullman-algorithm-for-register-allocat/).
+Our shared-DAG ordering is a heuristic; it does not claim the optimality of a tree algorithm.
 The interpreter, timing model and fixed-seed generators are ports of the kit,
 as permitted. No optimizer framework, solver, or external optimizer code is
 used. Candidate decisions do not depend on filenames, hashes, the network or
@@ -42,7 +45,8 @@ with a positive constant step and an explicit signed-underflow guard.
 
 Back end: parallel-copy SSA destruction, unlimited-name and K-name allocation,
 copy-related spill webs, bounded-distance reload reuse, pre/post-allocation
-scheduling, optional legal color spreading, loop-based layout and trace-derived
+scheduling, a pressure-aware scheduling alternative, iterative pure-region tree
+ordering, optional legal color spreading, loop-based layout and trace-derived
 layout alternatives, copying of tiny return blocks into jumping predecessors,
 and removal of spill stores that are never reloaded. SSA memory facts allow the pre-allocation scheduler to
 separate proven-disjoint accesses and recognize proven-safe loads.
@@ -79,8 +83,9 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
 6. For full-effort programs: a flatten chain (split irreducible cycles, peel by
    16, thread, recompile; up to four steps on the best three distinct programs,
    under a deterministic budget of compiled instructions); a load-phi stage
-   recompiling the best five distinct programs (at most 8,000 instructions) with load phis and return-block copies, with and without store selects; then chain and
-   hot-block layout alternatives from up to eight good candidates. Measure them with the exact same cycle model.
+   recompiling the best five distinct programs (at most 8,000 instructions) with load phis and return-block copies, with and without store selects; then pressure-aware scheduling, bounded
+   rematerialization, pure-region tree ordering and arithmetic alternatives.
+   Finally try chain/hot-block layouts and exact block/suffix sharing from up to eight good candidates. Measure them with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
 
@@ -132,11 +137,14 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Return-block copies | In the load-phi stage, a return block (at most 32 instructions) gets a private copy for each predecessor whose phi inputs are all constants, within 512 new instructions; folding then shrinks the copy. | The block ends in ret, so its values have no other users; each path executes the same instructions with the same values. |
 | Irreducible splitting | Tarjan SCCs; each extra entry of a multi-entry region gets its own copy of the region within a code budget. | Copying blocks and redirecting edges in register form keeps every execution's instruction sequence. |
 | SSA destruction | Edge parallel copies, critical-edge splitting, temporary cycle breaking. | Read all copy sources before overwriting them. |
-| Unlimited allocation | Interference/coalescing and greedy coloring; O(n+E) plus set work. | Simultaneously live values cannot share a name. On two million edge insertion attempts, use distinct names rather than build an unbounded dense graph. |
-| K-name allocation | Conservative coalescing, ordered-set simplify/select, scratch spills and retry. | Scratch is used only if original accesses are proven below 3072. Copy-related spill webs share a word only when legal. |
+| Unlimited allocation | Interference/coalescing and greedy coloring; O(n+E) plus set work. | Simultaneously live values cannot share a name. On eight million edge insertion attempts, use distinct names rather than build an unbounded dense graph; neighbour lists are sorted vectors to keep memory low. |
+| K-name allocation | Conservative coalescing, ordered-set simplify/select, scratch spills and retry. Spill webs that are never live at the same time share a scratch word (greedy colouring over the interference graph of all members of each spilled web). Also tried for the largest programs; skipped when the graph exceeds 1.5 million edges. | Scratch is used only if original accesses are proven below 3072. Copy-related spill webs share a word only when legal. |
 | Reload reuse | Retain fresh load/result temporaries for nearby uses in a block. | Cached slot contents must still match; definitions/stores update or invalidate the entry. Failed retention retries without reuse. |
 | Color spreading | Try additional interference-legal colors within a bounded hardware-name preference set. | Coloring legality is unchanged. Unlimited allocation may still need more names; the preference cap is not a semantic register limit. |
 | Scheduling | List scheduling in fixed windows, before/after allocation; O(n·w). | Preserve RAW/WAR/WAW, alias, trap and effect constraints. SSA memory ordinals must still match; otherwise facts are disabled. |
+| Pressure scheduling | An extra pre-allocation alternative prefers last uses over new live definitions when ready issue times tie and K is nearly full; O(n·w) plus liveness. Exported values and exact backwards window-boundary sets retain future uses. | Only priorities change; the existing dependency/effect graph is unchanged. |
+| Pure-region tree ordering | Order dependencies by estimated register need, then emit iterative postorder inside contiguous pure SSA regions; O(n), at most three operands per instruction. Used as an extra large-program or late-search candidate. | Emit every original instruction once, after its operands; never cross memory, division, volatile operations or control flow. No algebraic rewrites or recursion. Shared DAG estimates are heuristic. |
+| Rematerialization | Offer at most 64 copies of cheap one-instruction parameter/constant recipes with 2–8 separated instruction users; O(n) scanning and fixed-budget cloning. No phi users; no GVN afterward. | Immutable leaves dominate every use. No effects/traps. Each parameter already has an independent use at/after the clone in its block, excluding all recipe definitions, so moving recipes does not invalidate the lifetime guard. |
 | Rotation/unroll/peel/thread | Duplicate/register-form blocks and redirect edges; O(n·U) within code-growth budgets. | Each new path executes the same original instructions, except tests established redundant. |
 | Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
 | Header counted groups | Let D=(U-1)s. Guard bound >= INT_MIN+D, then test i < bound-D per group. | Intermediate increments cannot wrap before a skipped test. Each copy writes comparison=1. Keep the final possibly wrapping increment and original scalar exit test. |

@@ -52,6 +52,8 @@ bool aliasForward(Func &f);        // load after may-alias stores -> select on a
 bool closedFormLoops(Func &f);     // counted summation loops -> exit values in closed form
 bool deadScratchStores(Func &f);   // stores to unread constant scratch words
 bool popcountLoops(Func &f);       // bit-counting loops -> SWAR population count
+bool rematerialize(Func &f, const Machine &m);
+bool schedulePureTrees(Func &f);
 bool shareDivRem(Func &f, const Machine &m);
 bool signedPowerTwo(Func &f, const Machine &m);
 bool divByConstant(Func &f, const Machine &m);   // bounded x / C, x % C -> multiply and shift

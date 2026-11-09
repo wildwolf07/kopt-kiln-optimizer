@@ -18,6 +18,7 @@ struct BackendOptions {
     bool preSchedule = false;    // also list-schedule on values before register allocation
     int spillReuse = 4;          // a reload serves later uses within this many instructions
     bool spreadColors = false;  // use spare hardware names to break false dependencies
+    bool pressureSchedule = false; // alternative: finish local live ranges before opening more
 };
 
 // True when lowering with spillToK may use the scratch region (all of the

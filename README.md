@@ -23,17 +23,18 @@ branch adds loop-nest flattening, irreducible-cycle splitting, closed forms
 for summation loops, population-count and bit-reverse idioms, state-machine
 dispatch tables, division by constants, min/max and Horner regrouping,
 counting selects, load phis, store selects, return-block copying and
-profile-guided timing inputs. This `optimizer-next` branch builds on
-`optimizer-best` at `02773ad` and adds late arithmetic candidates plus exact
-block/tail sharing; the active checkout of that branch is not modified.
+profile-guided timing inputs. This `optimizer-frontier` branch combines
+`optimizer-next` at `8a818d6` with spill-slot sharing and larger-program
+allocation from `58b5077`, pressure-aware scheduling, pure-region tree ordering,
+and bounded rematerialization. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 10,178 | 10.19x |
-| few_registers | 202,164 | 25,592 | 15,931 | 12.69x |
-| no_fused | 107,966 | 20,218 | 13,051 | 8.27x |
-| slow_memory | 111,254 | 24,319 | 15,155 | 7.34x |
-| wide_fast | 55,744 | 12,923 | 7,785 | 7.16x |
+| default | 103,671 | 16,527 | 10,102 | 10.26x |
+| few_registers | 202,164 | 25,592 | 15,706 | 12.87x |
+| no_fused | 107,966 | 20,218 | 13,050 | 8.27x |
+| slow_memory | 111,254 | 24,319 | 14,822 | 7.51x |
+| wide_fast | 55,744 | 12,923 | 7,766 | 7.18x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
@@ -101,3 +102,10 @@ wrapping identity, and lower signed power-of-two operations using unsigned
 magnitudes (including INT_MIN). Original candidates remain available. Exact
 duplicate-block sharing and bounded common-suffix sharing can reduce cache
 pressure; the cycle model includes any extra jumps.
+
+Pressure scheduling tracks values needed by successor blocks and later scheduling
+windows. Pure-region tree ordering reduces long live ranges without crossing
+memory or trapping operations. Rematerialization duplicates only a bounded
+number of cheap parameter-based expressions, with guards against extending
+parameter lifetimes. These are measured alternatives, not unconditional choices.
+See [BENCHMARKS.md](BENCHMARKS.md) for paired results and individual regressions.

@@ -320,6 +320,15 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     };
     const Program *plain = emit(false, false, "");
     const bool overK = plain && distinctRegisters(*plain) > m.registers;
+    if (plainOnly && passEnabled("trees")) {
+        Func tree = f;
+        if (schedulePureTrees(tree)) {
+            BackendOptions bo;
+            Cand c; c.p = lowerToProgram(tree, m, bo);
+            c.what = tag + "/tree"; c.flags = fl;
+            out.push_back(std::move(c));
+        }
+    }
     if (plainOnly) {   // biggest programs: no pre-scheduled variants
         if (scratch && overK) emit(false, true, "+K");
         return;
@@ -551,7 +560,6 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     int effort = dense ? 0 : (progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0));
     if (trainingWork > 1000000) effort = 0;
     else if (trainingWork > 300000) effort = std::min(effort, 1);
-    const bool small = effort >= 1;
     std::vector<Cand> cands;
     // Phase 1: the SSA pipeline, in a few flavours.
     {
@@ -570,7 +578,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fl.speculate = kVariants[v][2];
             fl.strength = kVariants[v][3];
             fl.tabulate = v == 8;
-            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1, effort == 0);
+            compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), true, p1, effort == 0);
         }
         for (Cand &c : p1) quick(c);
         for (Cand &c : p1) cands.push_back(c);
@@ -771,6 +779,61 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 for (Cand &c : got) more.push_back(std::move(c));
             }
         for (Cand &c : more) cands.push_back(std::move(c));
+    }
+    if (effort == 2 && passEnabled("pressure")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> scheduled;
+        for (const Cand *seed : seeds) {
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            const bool scratch = canSpillToScratch(f);
+            for (int spill = 0; spill < (scratch ? 2 : 1); spill++) {
+                Func copy = f;
+                BackendOptions bo; bo.preSchedule = true; bo.pressureSchedule = true;
+                bo.spillToK = spill != 0;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + (spill ? "/pressureK" : "/pressure");
+                c.flags = seed->flags; quick(c); scheduled.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : scheduled) cands.push_back(std::move(c));
+    }
+    if (effort == 2 && passEnabled("remat")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> remat;
+        for (const Cand *seed : seeds) {
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            if (!rematerialize(f, m)) continue;
+            for (int pre = 0; pre < 2; pre++) {
+                Func copy = f;
+                BackendOptions bo; bo.preSchedule = pre != 0;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + (pre ? "/rematS" : "/remat");
+                c.flags = seed->flags; quick(c); remat.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : remat) cands.push_back(std::move(c));
+    }
+    if (effort == 2 && passEnabled("trees")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> trees;
+        for (const Cand *seed : seeds) {
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            if (!schedulePureTrees(f)) continue;
+            for (int spread = 0; spread < 2; spread++) {
+                Func copy = f;
+                BackendOptions bo; bo.spreadColors = spread != 0;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + (spread ? "/treeSpread" : "/tree");
+                c.flags = seed->flags; quick(c); trees.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : trees) cands.push_back(std::move(c));
     }
     if (effort == 2 && passEnabled("arithmetic")) {
         const auto seeds = bestDistinct(cands, 5);
