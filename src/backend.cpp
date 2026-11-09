@@ -701,6 +701,66 @@ bool canSpillToScratch(Func &f) { return memoryAccessesBelow(f, kScratchBase); }
 
 void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf);
 
+// Copy a tiny return block (at most 3 instructions) into each block that
+// jumps to it: the jump and its taken-branch fence disappear. Then fold
+// "mov a, s; ret a" into "ret s" (a is not read again after ret) and drop
+// blocks nothing reaches any more. Pure copying of a block's text: the path
+// executes the same instructions minus one jmp, so behaviour is unchanged.
+static void duplicateReturns(Program &p) {
+    const int nb = static_cast<int>(p.blocks.size());
+    auto isTinyRet = [&](int t) {
+        const Block &b = p.blocks[static_cast<size_t>(t)];
+        return t >= 0 && t < nb && !b.ins.empty() && b.ins.size() <= 3 && b.ins.back().op == OP_RET;
+    };
+    bool changed = false;
+    for (int i = 0; i < nb; i++) {
+        Block &b = p.blocks[static_cast<size_t>(i)];
+        if (b.ins.empty() || b.ins.back().op != OP_JMP) continue;
+        const int t = b.ins.back().target[0];
+        if (t == i || !isTinyRet(t)) continue;
+        std::vector<Instr> tail = p.blocks[static_cast<size_t>(t)].ins;   // copy: t may alias b's vector growth
+        b.ins.pop_back();
+        for (const Instr &x : tail) b.ins.push_back(x);
+        changed = true;
+    }
+    for (Block &b : p.blocks) {
+        const size_t n = b.ins.size();
+        if (n >= 2 && b.ins[n - 1].op == OP_RET && b.ins[n - 1].nsrc == 1 && b.ins[n - 1].src[0].isReg &&
+            b.ins[n - 2].op == OP_MOV && b.ins[n - 2].dst == b.ins[n - 1].src[0].v) {
+            b.ins[n - 1].src[0] = b.ins[n - 2].src[0];
+            b.ins.erase(b.ins.begin() + static_cast<long>(n - 2));
+        }
+    }
+    if (!changed) return;
+    std::vector<char> seen(static_cast<size_t>(nb), 0);
+    std::vector<int> stack{0};
+    seen[0] = 1;
+    while (!stack.empty()) {
+        const int x = stack.back();
+        stack.pop_back();
+        const Instr &term = p.blocks[static_cast<size_t>(x)].ins.back();
+        for (int k = 0; k < 2; k++) {
+            const int t = term.target[k];
+            if ((term.op == OP_JMP && k == 0) || term.op == OP_BR) {
+                if (t >= 0 && !seen[static_cast<size_t>(t)]) { seen[static_cast<size_t>(t)] = 1; stack.push_back(t); }
+            }
+        }
+    }
+    std::vector<int> remap(static_cast<size_t>(nb), -1);
+    std::vector<Block> kept;
+    for (int i = 0; i < nb; i++)
+        if (seen[static_cast<size_t>(i)]) { remap[static_cast<size_t>(i)] = static_cast<int>(kept.size()); kept.push_back(std::move(p.blocks[static_cast<size_t>(i)])); }
+    for (Block &b : kept) {
+        Instr &term = b.ins.back();
+        if (term.op == OP_JMP) term.target[0] = remap[static_cast<size_t>(term.target[0])];
+        if (term.op == OP_BR) {
+            term.target[0] = remap[static_cast<size_t>(term.target[0])];
+            term.target[1] = remap[static_cast<size_t>(term.target[1])];
+        }
+    }
+    p.blocks.swap(kept);
+}
+
 Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     const bool scratchFree = opt.spillToK && canSpillToScratch(f);
     estimateFrequencies(f);
@@ -776,6 +836,7 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
             out.ins.push_back(y);
         }
     }
+    duplicateReturns(p);
     if (opt.schedule) scheduleProgram(p, m);
     return p;
 }
