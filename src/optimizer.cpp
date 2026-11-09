@@ -115,6 +115,8 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         // run in the first round only (their facts stay valid afterwards).
         if (round == 0 || fsize < 20000) TIMED("vrp", (computeVRP(f), true));
         if (level >= 2 && fl.loadPhis && passEnabled("dupret")) c |= TIMED("dupret", dupConstReturns(f, 32, 512));
+        if (level >= 2 && passEnabled("closedform"))
+            for (int r = 0; r < 4 && TIMED("closedform", closedFormLoops(f)); r++) c = true;
         c |= TIMED("sccp", sccp(f));
         c |= TIMED("combineLinear", combineLinear(f));
         c |= TIMED("simplifyCFG", simplifyCFG(f));
@@ -126,6 +128,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("dce", dce(f));
         c |= TIMED("deadStores", deadStores(f));
+        c |= TIMED("deadScratch", deadScratchStores(f));
         c |= TIMED("simplifyCFG", simplifyCFG(f));
         if (level >= 2) c |= TIMED("licm", licm(f));
         if (!c) break;

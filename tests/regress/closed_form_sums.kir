@@ -1,0 +1,26 @@
+; summation loops with raw (possibly negative or huge) bounds and wrapping coefficients
+func closed_form_sums(v0, v1, v2)
+entry:
+  mov v3, v0
+  const v4, 0
+  const v5, 7
+  mul v6, v2, 2654435761
+  jmp head
+head:
+  lt v7, v3, v1
+  br v7, body, done
+body:
+  mul v8, v3, v3
+  mul v9, v8, v6
+  add v4, v4, v9
+  shl v10, v3, 3
+  sub v11, v10, v2
+  add v4, v4, v11
+  add v5, v5, 3
+  add v3, v3, 1
+  jmp head
+done:
+  vstore 0, v5
+  vstore 1, v3
+  add v12, v4, v5
+  ret v12

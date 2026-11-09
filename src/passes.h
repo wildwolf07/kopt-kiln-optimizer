@@ -49,6 +49,8 @@ bool loadPhis(Func &f);           // loads at merges whose value every predecess
 bool storeSelect(Func &f);         // conditional stores with known old values -> select + store
 bool dupConstReturns(Func &f, int maxSize, int maxNew);   // per-edge copies of return blocks fed constants
 bool aliasForward(Func &f);        // load after may-alias stores -> select on address equality
+bool closedFormLoops(Func &f);     // counted summation loops -> exit values in closed form
+bool deadScratchStores(Func &f);   // stores to unread constant scratch words
 bool dce(Func &f);                 // remove values nobody needs (never removes possible traps)
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader

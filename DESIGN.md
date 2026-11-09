@@ -115,6 +115,8 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Strength reduction | Replace i*c by a coupled recurrence; O(n) scanning plus CFG work. | The recurrence uses wrapping arithmetic. Save destination IDs before vector insertion so shifted instructions cannot be mistaken for the replacement. |
 | Reassociation | Shorten loop-carried addition chains; graph/SCC work. | Wrapping addition is associative and commutative. |
 | Sum balancing | In the load-phi stage's store-select variant, a chain of single-use adds outside loop recurrences with 4+ terms becomes a balanced tree when that cuts its depth by 2 or more. | 32-bit addition wraps, so it is associative and commutative. |
+| Closed-form loops | A loop that exits only at its header test i < n (n invariant, i = phi(i0, i+1)), with a pure body whose other header phis are accumulators s' = s + c0 + c1*i + c2*i^2 (invariant c), is replaced by its exit values computed before it: T = (i0 < n) ? n - i0 : 0, S1 = T(T-1)/2 (halve the even factor), S2 = S1*(2T-1)*inv(3) mod 2^32. | The sums are exact integer identities, and all of them hold modulo 2^32. i + 1 cannot wrap because i < n <= INT_MAX. Pure bodies have no effects or traps to keep. Loop values may not be used outside except the header phis. |
+| Dead scratch stores | A store to a constant scratch word (3072..4095) that no load can read is removed. | The scratch region is not observable; a constant in-range address cannot trap. |
 | Min/max chains | In a block, a loop-carried chain of select(lt(p,q),q,p) (max) or select(lt(p,q),p,q) (min) becomes one carried step plus a balanced tree of the other inputs. | Signed min/max are associative and commutative and return one of their inputs, so every grouping gives the same bits. Inner nodes must have no other uses. |
 | Horner splitting | A chain h' = h*x + c of n >= 6 steps becomes k=2 chains in x^2 (k=4 in x^4 with 16+ registers), combined at the end. Values it creates are never split again. | Wrapping arithmetic is a commutative ring, so any regrouping of the polynomial is exact. Inner products and sums must be single-use. |
 | Counting selects | select(c, a, a+1) -> a + eq(c,0); select(c, a+1, a) -> a + (c != 0) (c itself when its range is 0..1). | Exact case analysis on c; the test leaves the a chain. |
@@ -177,6 +179,12 @@ first-increment signed-wrap hole, negative fused-shift range analysis,
 non-Boolean/sibling/loop facts, volatile effects and prior CFG bugs. Test inputs
 stored in `.in` files run in addition to generated cases. Sanitizer builds use
 `KOPT_BIN` in the test harness; no sanitizer dependency is required for judging.
+
+Moved code drops its recorded ranges. A value's range may rely on the branch
+facts of the block that defines it. Speculation, if-conversion, LICM and store
+selects therefore clear the recorded range of every value they move, and later
+queries recompute it from the operands. (A fuzz case showed a load hoisted out
+of a dead block whose range facts were contradictory.)
 
 ## 6. Profiles
 
