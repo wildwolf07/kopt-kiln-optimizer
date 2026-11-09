@@ -154,9 +154,9 @@ def main():
     good = [r for r in rows if r["ok"]]
     for r in rows:
         if a.verbose and r["ok"]:
-            print("%-24s %-14s %8d -> %8d  x%5.2f  (%d -> %d instrs, %.2fs)" % (
+            print("%-24s %-14s %8d -> %8d  x%5.2f  held-out %8d -> %8d  x%5.2f  (%d -> %d instrs, %.2fs)" % (
                 r["name"], r["machine"], r["c0"], r["c1"], r["c0"] / max(1, r["c1"]),
-                r["n0"], r["n1"], r["kopt_s"]))
+                r["r0"], r["r1"], max(1, r["r0"]) / max(1, r["r1"]), r["n0"], r["n1"], r["kopt_s"]))
     for r in fails:
         print("FAIL %-24s %-14s %s" % (r["name"], r["machine"], r["err"]))
     by_m = {}

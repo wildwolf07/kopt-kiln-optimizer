@@ -77,9 +77,9 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    Full-effort runs also perform two rounds of threading/peeling on the best
    distinct candidates. Original compact-color and spill choices remain available.
 6. For full-effort programs: a flatten chain (split irreducible cycles, peel by
-   16, thread, recompile; up to four steps on the best three candidates, under a
-   deterministic budget of compiled instructions); a load-phi stage recompiling
-   the best three with load phis and return-block copies, with and without store selects; then chain and
+   16, thread, recompile; up to four steps on the best five distinct programs,
+   under a deterministic budget of compiled instructions); a load-phi stage
+   recompiling the best five distinct programs (at most 8,000 instructions) with load phis and return-block copies, with and without store selects; then chain and
    hot-block layout alternatives from up to eight good candidates. Measure them with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.

@@ -195,6 +195,25 @@ struct Cand {
     bool ok = false;
 };
 
+// The best `count` candidates whose programs differ (backend variants of one
+// program often fill the top places with near-copies).
+std::vector<const Cand *> bestDistinct(const std::vector<Cand> &cands, size_t count) {
+    std::vector<const Cand *> best;
+    for (const Cand &c : cands) if (c.ok) best.push_back(&c);
+    std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+    std::vector<const Cand *> out;
+    std::vector<std::string> seen;
+    for (const Cand *c : best) {
+        if (out.size() >= count) break;
+        std::string text = printProgram(c->p);
+        if (std::find(seen.begin(), seen.end(), text) != seen.end()) continue;
+        seen.push_back(text);
+        out.push_back(c);
+    }
+    return out;
+}
+
+
 // A deterministic layout hint from executions on our fixed training inputs.
 // Only block order and label indices change; all instructions remain intact.
 Program traceLayout(const Program &p, const std::vector<Input> &inputs, bool chains) {
@@ -403,6 +422,8 @@ std::map<std::pair<int, int>, double> edgeCounts(const Program &p, const std::ve
     }
     return out;
 }
+
+const size_t kSeeds = 5;   // distinct programs seeding the late stages
 
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
@@ -687,11 +708,9 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // code that GVN and the scheduler can work on. Each step is a candidate; the
     // simulator (with the icache cost) decides.
     if (effort == 2 && passEnabled("flatten")) {
-        std::vector<const Cand *> best;
-        for (const Cand &c : cands) if (c.ok) best.push_back(&c);
-        std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
         std::vector<std::pair<Program, std::pair<std::string, Flags>>> seeds;
-        for (size_t i = 0; i < std::min<size_t>(3, best.size()); i++)
+        for (size_t i = 0; i < best.size(); i++)
             seeds.push_back({best[i]->p, {best[i]->what, best[i]->flags}});
         // Bounded so compile time stays small whatever the machine's icache.
         // Deterministic work budget: total instructions compiled by this chain.
@@ -728,12 +747,13 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // Load phis on the best programs so far (a separate stage: it helps
     // mostly after unrolling/flattening has exposed the repeated loads).
     if (effort == 2 && passEnabled("loadphis")) {
-        std::vector<const Cand *> best;
-        for (const Cand &c : cands) if (c.ok) best.push_back(&c);
-        std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
         std::vector<Cand> more;
-        for (size_t i = 0; i < std::min<size_t>(3, best.size()); i++)
+        size_t lpWork = 0;   // deterministic budget: instructions recompiled here
+        for (size_t i = 0; i < best.size(); i++)
             for (int ss = 0; ss < 2; ss++) {
+                if (lpWork + best[i]->p.instrCount() > 8000) continue;
+                lpWork += best[i]->p.instrCount();
                 Flags fl = best[i]->flags;
                 fl.loadPhis = true;
                 fl.storeSel = ss == 1;
