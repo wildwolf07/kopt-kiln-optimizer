@@ -1,0 +1,29 @@
+; min and max chains over signed words, with a mixed chain that must not be merged
+func minmax_chain(v0, v1)
+entry:
+  and v2, v0, 63
+  load v3, 0
+  mov v4, v3
+  mov v5, v3
+  const v6, 1
+  jmp head
+head:
+  lt v7, v6, v2
+  br v7, body, done
+body:
+  load v8, v6
+  lt v9, v4, v8
+  select v4, v9, v8, v4
+  lt v10, v8, v5
+  select v5, v10, v8, v5
+  xor v11, v8, v1
+  lt v12, v11, v5
+  select v13, v12, v5, v11
+  add v14, v13, 0
+  add v6, v6, 1
+  jmp head
+done:
+  sub v15, v4, v5
+  vstore 0, v4
+  vstore 0, v5
+  ret v15

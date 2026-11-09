@@ -2218,6 +2218,101 @@ bool reassociate(Func &f) {
             if (!pre.empty()) inserts.push_back({i, pre});
             changed = true;
         }
+        // Loop-carried min/max chains: select(lt(p, q), q, p) is max(p, q) and
+        // select(lt(p, q), p, q) is min(p, q) (signed). Both are associative and
+        // commutative and always return one of their inputs, so a chain
+        // acc' = max(max(max(acc, x0), x1), x2) has the same value as
+        // max(acc, max(max(x0, x1), x2)); the new form keeps one step on the
+        // loop-carried path and puts the others in a balanced tree.
+        // kind: 1 = max, 2 = min, 0 = neither. condAt receives the lt's index.
+        auto mmKind = [&](const Inst &x, const Inst **cond) -> int {
+            if (x.op != OP_SELECT || x.dst < 0 || x.a[0].isConst) return 0;
+            const Inst *c = defInst(f, ds, x.a[0]);
+            if (!c || c->op != OP_LT || uses[x.a[0].v] != 1 || ds[x.a[0].v].block != b) return 0;
+            if (c->a[0] == c->a[1]) return 0;
+            *cond = c;
+            if (x.a[1] == c->a[1] && x.a[2] == c->a[0]) return 1;
+            if (x.a[1] == c->a[0] && x.a[2] == c->a[1]) return 2;
+            return 0;
+        };
+        if (inserts.empty()) {
+            std::vector<std::pair<size_t, std::vector<Inst>>> mmInserts;
+            // Back to front, so the first root found is the end of its chain.
+            for (size_t i = f.bb[b].insts.size(); i-- > 0;) {
+                const Inst root = f.bb[b].insts[i];
+                const Inst *rc = nullptr;
+                const int kind = mmKind(root, &rc);
+                if (!kind || root.dst >= static_cast<int>(rec.size()) || rec[root.dst] < 0) continue;
+                const int cyc = rec[root.dst];
+                const int condVal = root.a[0].v;
+                std::vector<Opnd> leaves;
+                std::vector<Opnd> work{rc->a[0], rc->a[1]};
+                int inner = 0;
+                while (!work.empty()) {
+                    Opnd o = work.back();
+                    work.pop_back();
+                    const Inst *d = o.isConst ? nullptr : defInst(f, ds, o);
+                    const Inst *dc = nullptr;
+                    if (d && ds[o.v].block == b && uses[o.v] == 2 && o.v < static_cast<int>(rec.size()) && rec[o.v] == cyc &&
+                        inner < 16 && mmKind(*d, &dc) == kind) {
+                        inner++;
+                        work.push_back(dc->a[0]);
+                        work.push_back(dc->a[1]);
+                    } else {
+                        leaves.push_back(o);
+                    }
+                }
+                if (inner == 0) continue;
+                std::vector<Opnd> carried, rest;
+                for (Opnd o : leaves) {
+                    if (!o.isConst && o.v < static_cast<int>(rec.size()) && rec[o.v] == cyc) carried.push_back(o);
+                    else rest.push_back(o);
+                }
+                if (carried.size() != 1 || rest.empty()) continue;
+                // Index of the root's lt in this block (it must come before the root).
+                size_t condAt = i;
+                for (size_t j = 0; j < i; j++)
+                    if (f.bb[b].insts[j].dst == condVal) { condAt = j; break; }
+                if (condAt == i) continue;
+                std::vector<Inst> pre;
+                auto emit = [&](Opnd p, Opnd q) {
+                    Inst c;
+                    c.op = OP_LT; c.dst = f.newVal(); c.n = 2; c.a[0] = p; c.a[1] = q;
+                    Inst sel;
+                    sel.op = OP_SELECT; sel.dst = f.newVal(); sel.n = 3; sel.a[0] = Opnd::val(c.dst);
+                    sel.a[1] = kind == 1 ? q : p;
+                    sel.a[2] = kind == 1 ? p : q;
+                    pre.push_back(c);
+                    pre.push_back(sel);
+                    return Opnd::val(sel.dst);
+                };
+                std::vector<Opnd> level = rest;
+                while (level.size() > 1) {
+                    std::vector<Opnd> next;
+                    for (size_t k = 0; k + 1 < level.size(); k += 2) next.push_back(emit(level[k], level[k + 1]));
+                    if (level.size() % 2) next.push_back(level.back());
+                    level.swap(next);
+                }
+                const Opnd t = level[0];
+                Inst &rcm = f.bb[b].insts[condAt];
+                rcm.a[0] = carried[0];
+                rcm.a[1] = t;
+                Inst &r = f.bb[b].insts[i];
+                r.a[1] = kind == 1 ? t : carried[0];
+                r.a[2] = kind == 1 ? carried[0] : t;
+                if (!pre.empty()) mmInserts.push_back({condAt, pre});
+                changed = true;
+                break;   // one chain per block per run; ds/uses are stale after this
+            }
+            for (auto it = mmInserts.rbegin(); it != mmInserts.rend(); ++it) {
+                auto &ins = f.bb[b].insts;
+                ins.insert(ins.begin() + static_cast<long>(it->first), it->second.begin(), it->second.end());
+            }
+            if (!mmInserts.empty()) {
+                ds = defSites(f);
+                uses.resize(f.nvals, 0);
+            }
+        }
         for (auto it = inserts.rbegin(); it != inserts.rend(); ++it) {
             auto &ins = f.bb[b].insts;
             ins.insert(ins.begin() + it->first, it->second.begin(), it->second.end());
