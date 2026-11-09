@@ -75,7 +75,7 @@ bool parseLit(const std::string &s, int64_t &val) {
     bool neg = false;
     if (i < s.size() && s[i] == '-') { neg = true; i++; }
     if (i >= s.size()) return false;
-    __int128 n = 0;
+    int64_t n = 0;   // at most 2^40 before the range check, so no overflow
     if (s.size() - i > 2 && s[i] == '0' && s[i + 1] == 'x') {
         i += 2;
         for (; i < s.size(); i++) {
@@ -86,19 +86,19 @@ bool parseLit(const std::string &s, int64_t &val) {
             else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
             else return false;
             n = n * 16 + d;
-            if (n > ((__int128)1 << 40)) return false;
+            if (n > (int64_t(1) << 40)) return false;
         }
     } else {
         for (; i < s.size(); i++) {
             char c = s[i];
             if (c < '0' || c > '9') return false;
             n = n * 10 + (c - '0');
-            if (n > ((__int128)1 << 40)) return false;
+            if (n > (int64_t(1) << 40)) return false;
         }
     }
     if (neg) n = -n;
-    if (n < -((__int128)1 << 31) || n > (((__int128)1 << 32) - 1)) return false;
-    val = static_cast<int64_t>(n);
+    if (n < -(int64_t(1) << 31) || n > ((int64_t(1) << 32) - 1)) return false;
+    val = n;
     return true;
 }
 
