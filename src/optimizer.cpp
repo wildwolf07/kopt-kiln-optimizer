@@ -163,26 +163,34 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     std::string err;
     if (!buildSSA(in, f, err)) return;
     runPipeline(f, m, level, fl);
-    Func copy;
     const bool scratch = tryK && canSpillToScratch(f);
-    if (scratch) copy = f;
-    BackendOptions bo;
-    Cand c;
-    c.p = lowerToProgram(f, m, bo);
-    if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
-    c.what = tag;
-    c.flags = fl;
-    const bool overK = distinctRegisters(c.p) > m.registers;
-    out.push_back(std::move(c));
-    if (scratch && overK) {
-        bo.spillToK = true;
-        Cand k;
-        k.p = lowerToProgram(copy, m, bo);
-        if (usesUnsupported(k.p, m)) k.p = legalize(k.p, m);
-        k.what = tag + "+K";
-        k.flags = fl;
-        out.push_back(std::move(k));
-    }
+    // Backend variants of the same optimized function: plain; scheduled on
+    // values before allocation (+S: independent long-latency results get
+    // different registers); and, when the program needs more than K names and
+    // scratch is free, K names with spills to scratch (+K, +KS).
+    std::vector<std::string> texts;
+    auto emit = [&](bool pre, bool k, const char *suffix) -> const Program * {
+        Func g = f;
+        BackendOptions bo;
+        bo.preSchedule = pre;
+        bo.spillToK = k;
+        Cand c;
+        c.p = lowerToProgram(g, m, bo);
+        if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
+        std::string text = printProgram(c.p);
+        for (const std::string &t : texts) if (t == text) return nullptr;
+        texts.push_back(text);
+        c.what = tag + suffix;
+        c.flags = fl;
+        out.push_back(std::move(c));
+        return &out.back().p;
+    };
+    const Program *plain = emit(false, false, "");
+    const bool overK = plain && distinctRegisters(*plain) > m.registers;
+    const Program *pre = emit(true, false, "+S");
+    const bool preOverK = pre && distinctRegisters(*pre) > m.registers;
+    if (scratch && overK) emit(false, true, "+K");
+    if (scratch && (overK || preOverK)) emit(true, true, "+KS");
 }
 
 }  // namespace

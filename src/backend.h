@@ -15,6 +15,7 @@ struct BackendOptions {
     bool coalesce = true;        // remove copies by giving both sides one register
     bool profileLayout = true;   // use block frequencies to choose fall-throughs
     bool spillToK = false;       // use at most K names, spilling to scratch memory if needed
+    bool preSchedule = false;    // also list-schedule on values before register allocation
     int spillReuse = 4;          // a reload serves later uses within this many instructions
 };
 

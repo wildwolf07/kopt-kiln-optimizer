@@ -649,10 +649,16 @@ std::vector<int> layoutBlocks(Func &f) {
 
 bool canSpillToScratch(Func &f) { return memoryAccessesBelow(f, kScratchBase); }
 
+void preScheduleFunc(Func &f, const Machine &m);
+
 Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     const bool scratchFree = opt.spillToK && canSpillToScratch(f);
     estimateFrequencies(f);
     destructSSA(f);
+    // Optional: list-schedule on values before allocation, so independent
+    // long-latency results get different registers (in-order issue waits for
+    // a register's old value before writing it again).
+    if (opt.preSchedule) preScheduleFunc(f, m);
     Allocation A;
     bool haveK = false;
     if (scratchFree) {
@@ -896,6 +902,34 @@ void scheduleProgram(Program &p, const Machine &m) {
             scheduleBlock(w, m);
             std::copy(w.ins.begin(), w.ins.end() - 1, blk.ins.begin() + start);
         }
+    }
+}
+
+// Pre-allocation scheduling: the same list scheduler, run on value numbers.
+// Each instruction carries its index in target[0] so the order maps back.
+void preScheduleFunc(Func &f, const Machine &m) {
+    for (BB &B : f.bb) {
+        if (!B.alive || B.insts.size() <= 2) continue;
+        Program tmp;
+        tmp.blocks.resize(1);
+        Block &w = tmp.blocks[0];
+        for (size_t i = 0; i < B.insts.size(); i++) {
+            const Inst &x = B.insts[i];
+            Instr y;
+            y.op = x.op;
+            y.k = x.k;
+            y.nsrc = x.n;
+            if (x.dst >= 0) y.dst = static_cast<uint32_t>(x.dst);
+            for (int a = 0; a < x.n; a++)
+                y.src[a] = x.a[a].isConst ? Operand::imm(x.a[a].c) : Operand::reg(static_cast<uint32_t>(x.a[a].v));
+            y.target[0] = static_cast<int>(i);
+            w.ins.push_back(y);
+        }
+        scheduleProgram(tmp, m);
+        std::vector<Inst> out;
+        out.reserve(B.insts.size());
+        for (const Instr &y : w.ins) out.push_back(B.insts[static_cast<size_t>(y.target[0])]);
+        B.insts.swap(out);
     }
 }
 
