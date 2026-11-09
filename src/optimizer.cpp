@@ -3,8 +3,11 @@
 
 #include <cstdio>
 
+#include <algorithm>
+
 #include "backend.h"
 #include "ir.h"
+#include "loops.h"
 #include "passes.h"
 
 namespace kopt {
@@ -106,6 +109,21 @@ Checked check(const SimProgram &orig, const std::vector<RunResult> &origRuns, co
 
 }  // namespace
 
+namespace {
+
+bool compileOnce(const Program &in, const Machine &m, int level, Program &out) {
+    Func f;
+    std::string err;
+    if (!buildSSA(in, f, err)) return false;
+    runPipeline(f, m, level);
+    BackendOptions bo;
+    out = lowerToProgram(f, m, bo);
+    if (usesUnsupported(out, m)) out = legalize(out, m);
+    return true;
+}
+
+}  // namespace
+
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
     (void)profileText;
@@ -126,25 +144,47 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     }
     std::string best = usesUnsupported(orig, m) ? printProgram(base) : origText;
     uint64_t bestCycles = baseCycles;
-    for (int level = opt.maxLevel; level >= 1; level--) {
-        Func f;
-        std::string err;
-        if (!buildSSA(base, f, err)) break;
-        runPipeline(f, m, level);
-        BackendOptions bo;
-        Program cand = lowerToProgram(f, m, bo);
-        if (usesUnsupported(cand, m)) cand = legalize(cand, m);
+    auto consider = [&](const Program &cand, const char *what) {
         Checked c = check(so, origRuns, cand, inputs, m, timingSample);
         if (opt.verbose)
-            fprintf(stderr, "kopt: level %d -> %s, cycles %llu (input %llu)\n", level,
+            fprintf(stderr, "kopt: %-14s %s, cycles %llu (input %llu), %zu instrs\n", what,
                     c.ok ? "ok" : c.why.c_str(), static_cast<unsigned long long>(c.cycles),
-                    static_cast<unsigned long long>(baseCycles));
-        if (!c.ok) continue;
-        if (c.cycles <= bestCycles) {
+                    static_cast<unsigned long long>(baseCycles), cand.instrCount());
+        if (c.ok && c.cycles < bestCycles) {
             best = printProgram(cand);
             bestCycles = c.cycles;
         }
-        break;
+        return c.ok;
+    };
+    // Phase 1: the SSA pipeline (falling back to lower levels if the check fails).
+    Program phase1;
+    bool have1 = false;
+    for (int level = opt.maxLevel; level >= 1 && !have1; level--) {
+        Program cand;
+        if (!compileOnce(base, m, level, cand)) break;
+        if (consider(cand, level == opt.maxLevel ? "pipeline" : "pipeline-safe")) {
+            phase1 = cand;
+            have1 = true;
+        }
+    }
+    // Phase 2: loop rotation and unrolling on the register form of phase 1,
+    // then the whole pipeline again. The exact cycle model picks the winner.
+    if (have1 && phase1.instrCount() <= 20000) {
+        const int budget = std::max(24, m.icache_size);
+        const int factors[] = {1, 2, 4, 8};
+        for (int u : factors) {
+            std::vector<uint32_t> names;
+            Func rf = toRegisterForm(phase1, names);
+            bool rot = rotateLoops(rf, 8);
+            bool unr = unrollLoops(rf, u, budget);
+            if (!rot && !unr) continue;
+            Program transformed = fromRegisterForm(rf, names);
+            Program cand;
+            if (!compileOnce(transformed, m, opt.maxLevel, cand)) continue;
+            char what[32];
+            snprintf(what, sizeof what, "rotate+unroll%d", u);
+            consider(cand, what);
+        }
     }
     return best;
 }

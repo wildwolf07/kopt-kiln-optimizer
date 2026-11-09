@@ -202,6 +202,7 @@ int main(int argc, char **argv) {
     if (!profile.empty() && !readFile(profile, profText)) profText.clear();  // a bad profile is only a hint
 
     Options opt;
+    opt.verbose = getenv("KOPT_VERBOSE") != nullptr;
     std::string result = optimizeProgram(inText, prog, m, profText, opt);
     if (!writeFile(out, result)) die("cannot write " + out);
     return 0;
