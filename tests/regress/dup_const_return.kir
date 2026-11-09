@@ -1,0 +1,27 @@
+; a return block with effects and a possible trap, reached with constant and non-constant inputs
+func dup_const_return(v0, v1)
+entry:
+  and v2, v0, 3
+  eq v3, v2, 0
+  br v3, a, b
+a:
+  const v4, 7
+  const v5, 0
+  jmp out
+b:
+  eq v6, v2, 1
+  br v6, c, d
+c:
+  const v4, 12
+  const v5, 3
+  jmp out
+d:
+  mov v4, v1
+  mov v5, v2
+  jmp out
+out:
+  vstore 2, v4
+  div v7, v1, v5
+  add v8, v7, v4
+  store 9, v8
+  ret v8

@@ -110,6 +110,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         // Value ranges are the costliest analysis; on very large functions they
         // run in the first round only (their facts stay valid afterwards).
         if (round == 0 || fsize < 20000) TIMED("vrp", (computeVRP(f), true));
+        if (level >= 2 && fl.loadPhis && passEnabled("dupret")) c |= TIMED("dupret", dupConstReturns(f, 32, 512));
         c |= TIMED("sccp", sccp(f));
         c |= TIMED("combineLinear", combineLinear(f));
         c |= TIMED("simplifyCFG", simplifyCFG(f));

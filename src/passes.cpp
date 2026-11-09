@@ -2077,6 +2077,67 @@ bool storeSelect(Func &f) {
     return changed;
 }
 
+// A return block whose phi inputs from some predecessor are all constants gets
+// a private copy for that edge, with the constants substituted; constant
+// folding then reduces the copy (often to "ret C"), and the predecessor no
+// longer needs to keep those values alive. The block ends in ret, so its
+// values are not used anywhere else. Pure copying of executed instructions.
+bool dupConstReturns(Func &f, int maxSize, int maxNew) {
+    f.resolveAll();
+    f.rebuildPreds();
+    bool changed = false;
+    int budget = maxNew;
+    const int nb = static_cast<int>(f.bb.size());
+    for (int j = 1; j < nb; j++) {
+        if (!f.bb[j].alive || f.bb[j].phis.empty() || f.bb[j].term().op != OP_RET) continue;
+        if (static_cast<int>(f.bb[j].insts.size()) > maxSize) continue;
+        const std::vector<int> preds = f.bb[j].preds;
+        if (preds.size() < 2) continue;
+        for (int p : preds) {
+            if (budget < static_cast<int>(f.bb[j].insts.size())) break;
+            if (p == j || !f.bb[p].alive) continue;
+            bool allConst = true;
+            int count = 0;
+            for (const Phi &ph : f.bb[j].phis)
+                for (const auto &in : ph.in)
+                    if (in.first == p) { count++; if (!f.resolve(in.second).isConst) allConst = false; }
+            if (!allConst || count != static_cast<int>(f.bb[j].phis.size())) continue;
+            // Edge counted once only (a branch with both targets j is left alone).
+            const Inst &pt = f.bb[p].term();
+            if (pt.op == OP_BR && pt.tgt[0] == j && pt.tgt[1] == j) continue;
+            std::unordered_map<int, Opnd> map;
+            for (const Phi &ph : f.bb[j].phis)
+                for (const auto &in : ph.in)
+                    if (in.first == p) map[ph.dst] = f.resolve(in.second);
+            BB copy;
+            copy.label.clear();
+            for (const Inst &x0 : f.bb[j].insts) {
+                Inst x = x0;
+                for (int a = 0; a < x.n; a++) {
+                    Opnd o = f.resolve(x.a[a]);
+                    if (!o.isConst) { auto it = map.find(o.v); if (it != map.end()) o = it->second; }
+                    x.a[a] = o;
+                }
+                if (x.dst >= 0) { Val nv = f.newVal(); map[x0.dst] = Opnd::val(nv); x.dst = nv; }
+                copy.insts.push_back(x);
+            }
+            const int nbk = static_cast<int>(f.bb.size());
+            f.bb.push_back(copy);
+            Inst &t = f.bb[p].term();
+            for (int k = 0; k < 2; k++) if (t.tgt[k] == j) t.tgt[k] = nbk;
+            for (Phi &ph : f.bb[j].phis) {
+                std::vector<std::pair<int, Opnd>> keep;
+                for (auto &in : ph.in) if (in.first != p) keep.push_back(in);
+                ph.in.swap(keep);
+            }
+            budget -= static_cast<int>(f.bb[j].insts.size());
+            changed = true;
+        }
+    }
+    if (changed) f.rebuildPreds();
+    return changed;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);

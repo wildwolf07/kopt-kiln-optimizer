@@ -47,6 +47,7 @@ bool instSimplify(Func &f);        // algebraic simplification + copy propagatio
 bool gvn(Func &f);                 // dominator-scoped value numbering incl. loads and store forwarding
 bool loadPhis(Func &f);           // loads at merges whose value every predecessor knows -> phi
 bool storeSelect(Func &f);         // conditional stores with known old values -> select + store
+bool dupConstReturns(Func &f, int maxSize, int maxNew);   // per-edge copies of return blocks fed constants
 bool dce(Func &f);                 // remove values nobody needs (never removes possible traps)
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader

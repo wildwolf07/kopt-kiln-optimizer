@@ -78,7 +78,7 @@ but not used. Finite self-checking is not a proof of equivalence.
 6. For full-effort programs: a flatten chain (split irreducible cycles, peel by
    16, thread, recompile; up to four steps on the best three candidates, under a
    deterministic budget of compiled instructions); a load-phi stage recompiling
-   the best three with load phis, with and without store selects; then chain and
+   the best three with load phis and return-block copies, with and without store selects; then chain and
    hot-block layout alternatives from up to eight good candidates. Measure them with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
@@ -121,6 +121,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | If-conversion | Inline small safe arms and replace joins with select. | Both evaluated arms must be pure and non-trapping. |
 | Load phis | For a load, walk up single-predecessor blocks to the nearest merge; if every predecessor's chain ends with a known value for the same address and no possibly aliasing store follows it, insert a phi there. | Each path already accessed the word, so no trap is lost. The address is constant or defined in a block strictly dominating the merge, so it names the same word on every edge, back edges included. |
 | Store selects | Hoist a branch arm's leading pure work and stores (pairwise disjoint addresses defined above the branch) and store select(c, new, old). If the arm is then empty, merge its phi inputs into selects and remove it. | The old value must be known at the branch; the skipped path rewrites the same value into an already accessed word. Loads, volatile operations and possibly trapping work stop the hoisted run. |
+| Return-block copies | In the load-phi stage, a return block (at most 32 instructions) gets a private copy for each predecessor whose phi inputs are all constants, within 512 new instructions; folding then shrinks the copy. | The block ends in ret, so its values have no other users; each path executes the same instructions with the same values. |
 | Irreducible splitting | Tarjan SCCs; each extra entry of a multi-entry region gets its own copy of the region within a code budget. | Copying blocks and redirecting edges in register form keeps every execution's instruction sequence. |
 | SSA destruction | Edge parallel copies, critical-edge splitting, temporary cycle breaking. | Read all copy sources before overwriting them. |
 | Unlimited allocation | Interference/coalescing and greedy coloring; O(n+E) plus set work. | Simultaneously live values cannot share a name. On two million edge insertion attempts, use distinct names rather than build an unbounded dense graph. |
