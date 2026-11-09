@@ -1130,6 +1130,56 @@ bool licm(Func &f) {
 }
 
 // ---------------------------------------------------------------------------
+// Speculation: move pure, non-trapping work from a block into its only
+// predecessor (which ends in a branch). In SSA this never changes a result:
+// the hoisted value is simply computed earlier, also on the other path where
+// nobody uses it. It gives the per-block scheduler independent work to fill
+// latency gaps (for example the next unrolled iteration's division).
+// ---------------------------------------------------------------------------
+
+bool speculate(Func &f, int budgetPerEdge) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    bool changed = false;
+    DomInfo d = computeDominators(f);
+    // Walk blocks in reverse RPO so work can move up a chain of blocks step by step.
+    for (int idx = static_cast<int>(d.rpo.size()) - 1; idx >= 0; idx--) {
+        const int s = d.rpo[idx];
+        BB &S = f.bb[s];
+        if (s == 0 || S.preds.size() != 1 || !S.phis.empty()) continue;
+        const int p = S.preds[0];
+        if (p == s || f.bb[p].term().op != OP_BR) continue;
+        int moved = 0;
+        bool storeSeen = false;
+        std::vector<char> definedHere(f.nvals, 0);
+        for (const Inst &x : S.insts) if (x.dst >= 0) definedHere[x.dst] = 1;
+        for (size_t i = 0; i + 1 < S.insts.size() && moved < budgetPerEdge;) {
+            Inst x = S.insts[i];
+            bool ok = x.dst >= 0;
+            if (ok) {
+                if (isPure(x.op)) ok = true;
+                else if (x.op == OP_DIV || x.op == OP_MOD) ok = rangeOf(f, ds, x.a[1], 8).lo >= 1;
+                else if (x.op == OP_LOAD) ok = !storeSeen && rangeOf(f, ds, x.a[0], 8).hi < kMemWords;
+                else ok = false;
+            }
+            for (int a = 0; ok && a < x.n; a++)
+                if (!x.a[a].isConst && x.a[a].v < static_cast<int>(definedHere.size()) && definedHere[x.a[a].v]) ok = false;
+            if (x.op == OP_STORE) storeSeen = true;
+            if (!ok) { i++; continue; }
+            BB &P = f.bb[p];
+            P.insts.insert(P.insts.end() - 1, x);
+            f.bb[s].insts.erase(f.bb[s].insts.begin() + i);
+            definedHere[x.dst] = 0;
+            ds[x.dst] = DefSite{p, static_cast<int>(P.insts.size()) - 2, false};
+            moved++;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+// ---------------------------------------------------------------------------
 // Recurrences: values on a cycle of the SSA graph (through loop phis). Their
 // dependence chain bounds how fast a loop iteration can go.
 // ---------------------------------------------------------------------------

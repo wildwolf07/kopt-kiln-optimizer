@@ -128,6 +128,37 @@ std::vector<Input> generateInputs(int nparams, int count, uint64_t seed) {
     return out;
 }
 
+std::vector<Input> typicalInputs(int nparams, int count, uint64_t seed) {
+    static const uint32_t kCounts[] = {8, 10, 16, 20, 24, 30, 40, 50, 60, 64, 100};
+    Rng rng(seed);
+    std::vector<Input> out;
+    for (int i = 0; i < count; i++) {
+        Input in;
+        for (int j = 0; j < nparams; j++) {
+            uint64_t r = rng.below(20);
+            if (r < 11) in.args.push_back(kCounts[(i + j) % (sizeof(kCounts) / sizeof(kCounts[0]))]);
+            else if (r < 18) in.args.push_back(static_cast<uint32_t>(2 + rng.below(99)));
+            else in.args.push_back(static_cast<uint32_t>(rng.next()));
+        }
+        std::vector<uint32_t> words(256);
+        uint64_t mode = rng.below(4);
+        for (int w = 0; w < 256; w++) {
+            if (mode == 0) words[w] = static_cast<uint32_t>(rng.below(10));
+            else if (mode == 1) words[w] = static_cast<uint32_t>(w);
+            else if (mode == 2) words[w] = static_cast<uint32_t>(rng.below(100));
+            else words[w] = static_cast<uint32_t>(rng.below(1000));
+        }
+        in.segments.push_back({0, words});
+        for (uint32_t port = 0; port < 4; port++) {
+            std::vector<uint32_t> q(32);
+            for (int t = 0; t < 32; t++) q[t] = static_cast<uint32_t>(rng.below(100));
+            in.vin[port] = q;
+        }
+        out.push_back(std::move(in));
+    }
+    return out;
+}
+
 SimProgram::SimProgram(const Program &p) {
     std::unordered_map<uint32_t, int> regmap;
     auto rid = [&](uint32_t r) {

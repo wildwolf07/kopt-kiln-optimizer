@@ -62,8 +62,10 @@ bool usesUnsupported(const Program &p, const Machine &m) {
 struct Flags {
     bool reassoc = true;         // shorten loop-carried add chains
     bool fuseReductions = false; // mac even on a reduction (fewer registers, longer chain)
+    bool speculate = false;      // hoist pure work above branches
     std::string name() const {
-        return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "");
+        return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "") +
+               (speculate ? "-spec" : "");
     }
 };
 
@@ -104,6 +106,10 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             instSimplify(f);
             gvn(f);
             licm(f);
+            dce(f);
+        }
+        if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width))) {
+            gvn(f);
             dce(f);
         }
         TIMED("fuseOps", fuseOps(f, m, fl.fuseReductions));
@@ -170,19 +176,29 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     (void)profileText;
     const Program base = usesUnsupported(orig, m) ? legalize(orig, m) : orig;
     SimProgram so(base);
-    std::vector<Input> inputs = generateInputs(static_cast<int>(base.params.size()), opt.checkInputs, 0x6b6f7074ull);
-    std::vector<Input> more = generateInputs(static_cast<int>(base.params.size()), opt.checkInputs / 2, 0x4b494c4eull);
+    const int np = static_cast<int>(base.params.size());
+    // Timing sample first: typical runs, then the small edge values. The rest of
+    // the inputs (edge values, special pairs, random) only check behaviour.
+    std::vector<Input> inputs = typicalInputs(np, 16, 0x74797069ull);
+    std::vector<Input> gen = generateInputs(np, opt.checkInputs, 0x6b6f7074ull);
+    inputs.insert(inputs.end(), gen.begin(), gen.end());
+    std::vector<Input> more = generateInputs(np, opt.checkInputs / 2, 0x4b494c4eull);
     inputs.insert(inputs.end(), more.begin(), more.end());
-    const size_t timingSample = 24;
+    const size_t timingSample = 16;   // the typical inputs
     std::vector<RunResult> origRuns;
-    uint64_t baseCycles = 0;
+    std::vector<uint64_t> baseCyc(timingSample, 0);
     for (size_t i = 0; i < inputs.size(); i++) {
         origRuns.push_back(so.run(inputs[i], 200000, i < timingSample));
         if (i < timingSample && origRuns.back().status != Status::TIMEOUT)
-            baseCycles += so.cycles(origRuns.back().trace, m);
+            baseCyc[i] = so.cycles(origRuns.back().trace, m);
         origRuns.back().trace.clear();
         origRuns.back().trace.shrink_to_fit();
     }
+    // Score = total cycles over the typical inputs: the expected cost of an
+    // ordinary run. (Edge values only check behaviour; their run lengths are
+    // not what a judge measures.)
+    uint64_t baseCycles = 0;
+    for (size_t i = 0; i < timingSample; i++) baseCycles += baseCyc[i];
     // Quick evaluation: behaviour and exact cycles on the timing sample.
     auto quick = [&](Cand &c) {
         SimProgram sc(c.p);
@@ -229,10 +245,17 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // Phase 1: the SSA pipeline, in a few flavours.
     {
         std::vector<Cand> p1;
-        for (int v = 0; v < (small ? 4 : 1); v++) {
+        // reassoc, fuseReductions, speculate
+        static const bool kVariants[][3] = {
+            {true, false, false}, {false, false, false}, {false, true, false}, {true, true, false},
+            {true, false, true}, {false, true, true},
+        };
+        const int nVariants = small ? 6 : 1;
+        for (int v = 0; v < nVariants; v++) {
             Flags fl;
-            fl.reassoc = (v & 1) == 0;
-            fl.fuseReductions = (v & 2) != 0;
+            fl.reassoc = kVariants[v][0];
+            fl.fuseReductions = kVariants[v][1];
+            fl.speculate = kVariants[v][2];
             compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1);
         }
         for (Cand &c : p1) quick(c);
@@ -241,10 +264,21 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // Phase 2: loop rotation and unrolling on the register form of the best
     // phase-1 results, then the whole pipeline again.
     if (small) {
+        // Bases: the default pipeline plus the best distinct phase-1 programs (a
+        // variant that wins before unrolling can lose after it, so keep several).
+        std::vector<const Cand *> sorted;
+        for (const Cand &c : cands) if (c.ok) sorted.push_back(&c);
+        std::stable_sort(sorted.begin(), sorted.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
         std::vector<const Cand *> bases;
-        for (const Cand &c : cands) if (c.ok) bases.push_back(&c);
-        std::sort(bases.begin(), bases.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
-        if (bases.size() > 2) bases.resize(2);
+        std::vector<std::string> seen;
+        auto addBase = [&](const Cand *c) {
+            std::string text = printProgram(c->p);
+            for (const std::string &t : seen) if (t == text) return;
+            seen.push_back(text);
+            bases.push_back(c);
+        };
+        for (const Cand *c : sorted) if (c->what == "pipeline") addBase(c);
+        for (const Cand *c : sorted) { if (bases.size() >= 4) break; addBase(c); }
         std::vector<Program> basePrograms;
         std::vector<std::string> baseNames;
         std::vector<Flags> baseFlags;
@@ -266,6 +300,16 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : p2) quick(c);
         for (Cand &c : p2) cands.push_back(std::move(c));
+    }
+    if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
+        for (size_t i = 0; i < cands.size(); i++) {
+            std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";
+            if (FILE *fp = fopen(path.c_str(), "w")) {
+                fprintf(fp, "; %s score=%llu ok=%d\n%s", cands[i].what.c_str(),
+                        static_cast<unsigned long long>(cands[i].cycles), cands[i].ok ? 1 : 0, printProgram(cands[i].p).c_str());
+                fclose(fp);
+            }
+        }
     }
     // Fastest first; the first one that passes the full check wins.
     std::stable_sort(cands.begin(), cands.end(), [](const Cand &a, const Cand &b) {

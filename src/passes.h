@@ -31,6 +31,7 @@ bool dce(Func &f);                 // remove values nobody needs (never removes 
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader
 bool reassociate(Func &f);         // shorten loop-carried add chains
+bool speculate(Func &f, int budgetPerEdge);   // hoist pure work above branches
 bool fuseOps(Func &f, const Machine &m, bool fuseReductions = false);   // mac / addsh for this machine
 bool ifConvert(Func &f, const Machine &m);    // small branches -> select
 

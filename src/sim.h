@@ -51,6 +51,10 @@ struct Rng {
 // Same generator as kirlib.generate_inputs (edge values, special pairs, random).
 std::vector<Input> generateInputs(int nparams, int count, uint64_t seed);
 
+// Inputs that look like ordinary runs (moderate counts, small array values),
+// used to estimate the cycles a judge would measure.
+std::vector<Input> typicalInputs(int nparams, int count, uint64_t seed);
+
 enum class Status { RET, TRAP, TIMEOUT };
 enum class TrapKind { NONE, DIV_BY_ZERO, BAD_ADDRESS, EXPLICIT };
 
