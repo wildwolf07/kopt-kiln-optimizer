@@ -132,6 +132,10 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             licm(f);
             dce(f);
         }
+        if (fl.reassoc && TIMED("horner", hornerSplit(f, m.registers))) {
+            instSimplify(f);
+            dce(f);
+        }
         if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width))) {
             gvn(f);
             dce(f);

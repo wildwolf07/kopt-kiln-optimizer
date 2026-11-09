@@ -1,0 +1,88 @@
+; Horner chains with wrapping products; one intermediate is reused, which must cut the chain
+func horner_chains(v0, v1)
+entry:
+  load v2, 0
+  mov v3, v2
+  mul v10, v3, v0
+  xor v11, v1, 1390851129
+  add v3, v10, v11
+  mul v12, v3, v0
+  const v13, -31
+  add v3, v13, v12
+  mul v14, v3, v0
+  load v15, 3
+  add v3, v14, v15
+  mul v16, v3, v0
+  xor v17, v1, 1695753999
+  add v3, v17, v16
+  mul v18, v3, v0
+  const v19, 33
+  add v3, v18, v19
+  mul v20, v3, v0
+  load v21, 6
+  add v3, v21, v20
+  mul v22, v3, v0
+  xor v23, v1, 207388625
+  add v3, v22, v23
+  mul v24, v3, v0
+  const v25, -41
+  add v3, v25, v24
+  mul v26, v3, v0
+  load v27, 9
+  add v3, v26, v27
+  vstore 5, v3
+  mul v28, v3, v0
+  xor v29, v1, 404285458
+  add v3, v29, v28
+  mul v30, v3, v0
+  const v31, -4
+  add v3, v30, v31
+  mul v32, v3, v0
+  load v33, 12
+  add v3, v33, v32
+  mul v34, v3, v0
+  xor v35, v1, 249103478
+  add v3, v34, v35
+  mul v36, v3, v0
+  const v37, 14
+  add v3, v37, v36
+  mul v38, v3, v0
+  load v39, 15
+  add v3, v38, v39
+  mul v40, v3, v0
+  xor v41, v1, 922121677
+  add v3, v41, v40
+  mul v42, v3, v0
+  const v43, -46
+  add v3, v42, v43
+  mul v44, v3, v0
+  load v45, 18
+  add v3, v45, v44
+  mul v46, v3, v0
+  xor v47, v1, 369140571
+  add v3, v46, v47
+  mul v48, v3, v0
+  const v49, 5
+  add v3, v49, v48
+  mul v50, v3, v0
+  load v51, 21
+  add v3, v50, v51
+  mov v4, v3
+  mul v52, v1, v4
+  add v4, v52, 1000003
+  mul v53, v1, v4
+  add v4, v53, 2000006
+  mul v54, v1, v4
+  add v4, v54, 3000009
+  mul v55, v1, v4
+  add v4, v55, 4000012
+  mul v56, v1, v4
+  add v4, v56, 5000015
+  mul v57, v1, v4
+  add v4, v57, 6000018
+  mul v58, v1, v4
+  add v4, v58, 7000021
+  mul v59, v1, v4
+  add v4, v59, 8000024
+  add v5, v3, v4
+  ret v5

@@ -2325,6 +2325,137 @@ bool reassociate(Func &f) {
     return changed;
 }
 
+// Horner chains h' = h * x + c (32-bit wrapping arithmetic is a commutative
+// ring, so any regrouping of the polynomial gives the same bits). A chain of
+// n steps has n serial multiply-adds; split it into k interleaved chains in
+// y = x^k and combine them at the end:
+//   P = sum_j x^j * C_j(y), C_j holds the coefficients whose power is j mod k.
+// The critical path drops from about n to about n/k + log2(k) multiply-adds.
+bool hornerSplit(Func &f, int registers) {
+    f.resolveAll();
+    const int nv0 = f.nvals;   // values made here are never split again
+    std::vector<DefSite> ds = defSites(f);
+    std::vector<int> uses(f.nvals, 0);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+        for (Inst &x : B.insts) for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) uses[x.a[a].v]++;
+    }
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+      for (int again = 0; again < 8; again++) {
+        bool here = false;
+        if (!f.bb[b].alive) continue;
+        std::vector<char> consumed(f.bb[b].insts.size(), 0);
+        // index of a value's defining instruction in this block, or -1
+        auto localDef = [&](Opnd o) -> int {
+            if (o.isConst || o.v >= static_cast<int>(ds.size()) || ds[o.v].block != b) return -1;
+            const Inst *d = defInst(f, ds, o);
+            if (!d) return -1;
+            return static_cast<int>(d - &f.bb[b].insts[0]);
+        };
+        // One step: add(mul(h, x), c) with the mul used once. Returns false if not.
+        auto step = [&](int i, Opnd &h, Opnd &x, Opnd &c, int &mulAt, bool xKnown) {
+            const Inst &a = f.bb[b].insts[static_cast<size_t>(i)];
+            if (a.op != OP_ADD || a.dst < 0) return false;
+            for (int side = 0; side < 2; side++) {
+                Opnd m = a.a[side];
+                int mi = localDef(m);
+                if (mi < 0 || uses[m.v] != 1) continue;
+                const Inst &mu = f.bb[b].insts[static_cast<size_t>(mi)];
+                if (mu.op != OP_MUL || mu.dst >= nv0) continue;
+                for (int xs = 0; xs < 2; xs++) {
+                    Opnd cx = mu.a[xs], ch = mu.a[1 - xs];
+                    if (xKnown && !(cx == x)) continue;
+                    if (!xKnown) {
+                        // Prefer the side whose other operand continues the chain.
+                        int hi = localDef(ch);
+                        Opnd h2, x2, c2; int m2;
+                        if (!(hi >= 0 && uses[ch.v] == 1)) { if (xs == 0) continue; }
+                        else if (!(f.bb[b].insts[static_cast<size_t>(hi)].op == OP_ADD)) { if (xs == 0) continue; }
+                        (void)h2; (void)x2; (void)c2; (void)m2;
+                    }
+                    if (cx.isConst) continue;
+                    h = ch; x = cx; c = a.a[1 - side]; mulAt = mi;
+                    return true;
+                }
+            }
+            return false;
+        };
+        for (int i = static_cast<int>(f.bb[b].insts.size()) - 1; i >= 0; i--) {
+            if (consumed[static_cast<size_t>(i)]) continue;
+            Opnd h, x, c;
+            int mulAt;
+            if (!step(i, h, x, c, mulAt, false)) continue;
+            std::vector<Opnd> coef{c};   // c_n first; reversed later
+            std::vector<int> nodes{i, mulAt};
+            while (true) {
+                int hi = localDef(h);
+                if (hi < 0 || uses[h.v] != 1 || consumed[static_cast<size_t>(hi)]) break;
+                Opnd h2, c2;
+                Opnd x2 = x;
+                int m2;
+                if (!step(hi, h2, x2, c2, m2, true)) break;
+                coef.push_back(c2);
+                nodes.push_back(hi);
+                nodes.push_back(m2);
+                h = h2;
+            }
+            coef.push_back(h);   // c_0, the innermost value
+            for (int nd : nodes) consumed[static_cast<size_t>(nd)] = 1;
+            const int n = static_cast<int>(coef.size()) - 1;   // multiply-add steps
+            if (n < 6) continue;
+            if (localDef(x) > i) continue;
+            std::reverse(coef.begin(), coef.end());   // coef[i] multiplies x^(n-i)
+            const int k = (n >= 16 && registers >= 16) ? 4 : 2;
+            std::vector<Inst> pre;
+            auto bin = [&](Op op, Opnd p, Opnd q) {
+                Inst t;
+                t.op = op; t.dst = f.newVal(); t.n = 2; t.a[0] = p; t.a[1] = q;
+                pre.push_back(t);
+                return Opnd::val(t.dst);
+            };
+            const Opnd x2 = bin(OP_MUL, x, x);
+            const Opnd y = k == 2 ? x2 : bin(OP_MUL, x2, x2);
+            std::vector<Opnd> chain(static_cast<size_t>(k));
+            std::vector<char> started(static_cast<size_t>(k), 0);
+            for (int ci = 0; ci <= n; ci++) {
+                const int j = (n - ci) % k;
+                if (!started[static_cast<size_t>(j)]) { chain[static_cast<size_t>(j)] = coef[static_cast<size_t>(ci)]; started[static_cast<size_t>(j)] = 1; }
+                else chain[static_cast<size_t>(j)] = bin(OP_ADD, bin(OP_MUL, chain[static_cast<size_t>(j)], y), coef[static_cast<size_t>(ci)]);
+            }
+            Opnd lo = bin(OP_MUL, x, chain[1]);
+            Opnd res0 = chain[0];
+            Inst &root = f.bb[b].insts[static_cast<size_t>(i)];
+            Inst fin;
+            fin.op = OP_ADD; fin.dst = root.dst; fin.n = 2;
+            if (k == 2) {
+                fin.a[0] = lo; fin.a[1] = res0;
+            } else {
+                Opnd L = bin(OP_ADD, lo, res0);
+                Opnd H = bin(OP_ADD, bin(OP_MUL, x, chain[3]), chain[2]);
+                fin.a[0] = bin(OP_MUL, x2, H); fin.a[1] = L;
+            }
+            pre.push_back(fin);
+            auto &ins = f.bb[b].insts;
+            ins.erase(ins.begin() + i);
+            ins.insert(ins.begin() + i, pre.begin(), pre.end());
+            changed = here = true;
+            break;   // positions and def sites are stale: rescan this block
+        }
+        if (!here) break;
+        { ds = defSites(f); uses.assign(f.nvals, 0);
+            for (BB &B : f.bb) {
+                if (!B.alive) continue;
+                for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+                for (Inst &xx : B.insts) for (int a = 0; a < xx.n; a++) if (!xx.a[a].isConst) uses[xx.a[a].v]++;
+            }
+        }
+      }
+    }
+    return changed;
+}
+
 // ---------------------------------------------------------------------------
 // Machine-specific fusion and strength reduction
 // ---------------------------------------------------------------------------
