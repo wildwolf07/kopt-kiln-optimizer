@@ -29,7 +29,7 @@ sys.path.insert(0, KIT)
 import kirlib as K  # noqa: E402  (the kit's reference implementation)
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-KOPT = os.path.join(ROOT, "kopt")
+KOPT = os.environ.get("KOPT_EXEC", os.path.join(ROOT, "kopt"))
 
 
 def run_kopt(src, machine, prof, out, identity, timeout):
@@ -61,7 +61,7 @@ def cycles_of(cp, inp, mc, max_steps):
 
 
 def check_one(job):
-    name, src, machine, nrandom, identity, use_prof, timeout, seed = job
+    name, src, machine, nrandom, identity, use_prof, timeout, seed, score_offset = job
     mname = os.path.basename(machine).replace("machine_", "").replace(".cfg", "")
     prof = src[:-4] + ".prof"
     prof = prof if (use_prof and os.path.exists(prof)) else None
@@ -101,7 +101,7 @@ def check_one(job):
         # Held-out generated inputs (a seed kopt never sees): a less noisy
         # estimate than the single sample input.
         r0 = r1 = 0
-        for inp in K.generate_inputs(len(orig.params), 8, seed + 7919):
+        for inp in K.generate_inputs(len(orig.params), score_offset + 8, seed + 7919)[score_offset:]:
             x0, _ = cycles_of(cp0, inp, mc, 2000000)
             x1, _ = cycles_of(cp1, inp, mc, 2000000)
             if x0 is None or x1 is None:
@@ -128,6 +128,8 @@ def main():
                     help="'all' or comma list: default,few_registers,no_fused,slow_memory,wide_fast")
     ap.add_argument("--random", type=int, default=30, help="generated inputs per check")
     ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--score-offset", type=int, default=0,
+                    help="offset into held-out inputs; use 40 to score random inputs beyond fixed edge cases")
     ap.add_argument("--identity", action="store_true", help="baseline: output = input")
     ap.add_argument("--no-profile", action="store_true")
     ap.add_argument("--timeout", type=float, default=10.0)
@@ -137,6 +139,8 @@ def main():
     ap.add_argument("--save", default=None, help="write per-program cycles to this JSON file")
     ap.add_argument("--compare", default=None, help="show differences against a saved JSON file")
     a = ap.parse_args()
+    if a.score_offset < 0:
+        ap.error("--score-offset must be nonnegative")
 
     bench = a.dir or os.path.join(KIT, "bench")
     srcs = sorted(glob.glob(os.path.join(bench, "*.kir")))
@@ -146,7 +150,7 @@ def main():
         if a.machines == "all" else a.machines.split(",")
     machines = [os.path.join(KIT, "machines", "machine_%s.cfg" % m) for m in mnames]
     jobs = [(os.path.basename(s)[:-4], s, m, a.random, a.identity, not a.no_profile,
-             a.timeout, a.seed) for m in machines for s in srcs]
+             a.timeout, a.seed, a.score_offset) for m in machines for s in srcs]
     t0 = time.time()
     with mp.Pool(a.jobs) as pool:
         rows = pool.map(check_one, jobs, chunksize=1)

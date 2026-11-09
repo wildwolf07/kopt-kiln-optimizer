@@ -72,5 +72,6 @@ bool parseProgram(const std::string &text, Program &out, std::string &err);
 
 // Print a program as KIR text that the official tools accept.
 std::string printProgram(const Program &p);
+Program compactBlocks(const Program &p, bool shareTails = false);
 
 }  // namespace kopt

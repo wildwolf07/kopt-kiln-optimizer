@@ -772,6 +772,28 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         for (Cand &c : more) cands.push_back(std::move(c));
     }
+    if (effort == 2 && passEnabled("arithmetic")) {
+        const auto seeds = bestDistinct(cands, 5);
+        std::vector<Cand> arithmetic;
+        for (const Cand *seed : seeds) {
+            Func f;
+            std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            bool changed = shareDivRem(f, m);
+            changed |= signedPowerTwo(f, m);
+            if (!changed) continue;
+            instSimplify(f); gvn(f); dce(f); simplifyCFG(f);
+            for (int pre = 0; pre < 2; pre++) {
+                Func copy = f;
+                BackendOptions bo; bo.preSchedule = pre != 0;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + (pre ? "/arithS" : "/arith");
+                c.flags = seed->flags; quick(c);
+                arithmetic.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : arithmetic) cands.push_back(std::move(c));
+    }
     if (effort == 2 && passEnabled("tracelayout")) {
         std::vector<const Cand *> best;
         for (const Cand &c : cands) if (c.ok) best.push_back(&c);
@@ -789,6 +811,19 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         }
         for (Cand &c : layouts) cands.push_back(std::move(c));
+    }
+    if (effort == 2 && passEnabled("compact")) {
+        const auto seeds = bestDistinct(cands, 8);
+        std::vector<Cand> compact;
+        for (const Cand *seed : seeds) {
+            for (bool tails : {false, true}) {
+                Cand c; c.p = compactBlocks(seed->p, tails);
+                if (c.p.instrCount() >= seed->p.instrCount()) continue;
+                c.what = seed->what + (tails ? "/tails" : "/compact"); c.flags = seed->flags;
+                quick(c); compact.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : compact) cands.push_back(std::move(c));
     }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {

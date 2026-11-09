@@ -27,6 +27,9 @@ CASES = {
     "traps": [("args 0", "TRAP div_by_zero"), ("args 1", "TRAP bad_address")],
     "explicit": [("args 91", "TRAP explicit(91)")],
     "fused": [("args 6 7", "RET 73")],
+    "signed_arithmetic": [("args -7", "RET 4294967289"), ("args 7", "RET 7"),
+                          ("args -2147483648", "RET 268435456"),
+                          ("args 2147483647", "RET 4026531856")],
 }
 # Own machine combinations; none are copied from the starter kit.
 BASE_MACHINE = {

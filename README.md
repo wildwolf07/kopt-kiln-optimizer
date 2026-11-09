@@ -23,15 +23,17 @@ branch adds loop-nest flattening, irreducible-cycle splitting, closed forms
 for summation loops, population-count and bit-reverse idioms, state-machine
 dispatch tables, division by constants, min/max and Horner regrouping,
 counting selects, load phis, store selects, return-block copying and
-profile-guided timing inputs.
+profile-guided timing inputs. This `optimizer-next` branch builds on
+`optimizer-best` at `02773ad` and adds late arithmetic candidates plus exact
+block/tail sharing; the active checkout of that branch is not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 10,185 | 10.18x |
-| few_registers | 202,164 | 25,592 | 15,937 | 12.69x |
-| no_fused | 107,966 | 20,218 | 13,103 | 8.24x |
-| slow_memory | 111,254 | 24,319 | 15,161 | 7.34x |
-| wide_fast | 55,744 | 12,923 | 7,901 | 7.06x |
+| default | 103,671 | 16,527 | 10,178 | 10.19x |
+| few_registers | 202,164 | 25,592 | 15,931 | 12.69x |
+| no_fused | 107,966 | 20,218 | 13,051 | 8.27x |
+| slow_memory | 111,254 | 24,319 | 15,155 | 7.34x |
+| wide_fast | 55,744 | 12,923 | 7,785 | 7.16x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
@@ -56,9 +58,11 @@ Independent kit checks (the kit is not bundled):
 ```sh
 export KIT=/path/to/LLH-26/Compilers/COMP10
 python3 tools/bench.py --machines all --random 50
-python3 tools/fuzz.py --count 2000 --seed 1123
-python3 tools/metamorph.py --count 1000 --seed 1124
+python3 tools/fuzz.py --count 2000 --seed 1205
+python3 tools/metamorph.py --count 1000 --seed 1206
 python3 tools/regress.py
+CXX=clang++ python3 tests/arithmetic_compact.py
+CXX=clang++ python3 tests/signed_pow2.py
 CXX=clang++ python3 tests/counted_loops.py --integrated-bin build/kopt-bin
 python3 tests/unswitch_pipeline.py
 ```
@@ -85,3 +89,15 @@ fixed-seed testing can miss.
 Training runs and self-checks are finite safeguards. Transformations still need
 semantic justification, and passing tests cannot guarantee a hidden-test score.
 There is no wall-clock-based choice of output or timed fallback.
+
+For actual randomized scoring beyond the generator's fixed edge prefix, run
+`python3 tools/bench.py --machines all --score-offset 40`. The historical
+default offset is zero and covers eight edge inputs, regardless of seed.
+`KOPT_EXEC=/absolute/path/to/another/kopt` selects a separate baseline executable
+without rebuilding or changing either checkout.
+
+New arithmetic candidates share a quotient/remainder pair using the exact
+wrapping identity, and lower signed power-of-two operations using unsigned
+magnitudes (including INT_MIN). Original candidates remain available. Exact
+duplicate-block sharing and bounded common-suffix sharing can reduce cache
+pressure; the cycle model includes any extra jumps.

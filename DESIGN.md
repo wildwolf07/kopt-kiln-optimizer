@@ -145,6 +145,28 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Unread spill stores | Remove stores to scratch spill words that no load reads (K-name allocation only). | All original addresses were proven below 3072, so only spill code touches scratch. |
 | Initial/trace layout | Loop-frequency chains; additional hot-block/edge layouts from fixed traces, O(T+b²). | Entry remains first; explicit targets are remapped. Prediction errors affect speed, not semantics. |
 
+The final arithmetic stage takes at most five distinct candidate programs and
+rebuilds SSA. In each block, identical quotient/remainder operands can share a
+quotient, with `r = a - q*b` modulo 2^32. If remainder occurs first, the new
+division executes at that same point, preserving the zero-divisor trap and
+earlier effects. Six-ALU signed power-of-two lowering uses unsigned absolute
+magnitude and sign-restoring selects; INT_MIN is representable as an unsigned
+magnitude. Constant zero and +/-1 divisors retain their existing treatment.
+Only cheaper-latency expansions are offered, and pre-scheduled and ordinary
+lowerings are compared. These transformations are O(n log n) for local pairing
+and O(n) for power-of-two expansion, before normal lowering costs.
+
+A final compaction stage offers exact duplicate blocks, then an alternative
+with shared identical suffixes (at least four instructions). Matches include
+opcodes, registers, literals, shift amounts and ordered targets. The entry
+stays first, explicit targets are remapped, and only unreachable copies are
+removed. Suffix sharing leaves each original prefix intact and jumps to the
+shared suffix; side effects/traps keep their execution order and multiplicity.
+At most four suffixes are shared, with at most 128 input blocks and 32 compared
+suffix instructions; this bounds pairwise matching work. Compaction itself
+does not imply faster execution: each alternative is measured including jump
+and instruction-cache costs.
+
 ## 4. The machine
 
 All machine keys are parsed. K and spill penalties affect allocation; latencies,
