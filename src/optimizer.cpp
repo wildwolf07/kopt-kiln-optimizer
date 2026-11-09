@@ -63,9 +63,10 @@ struct Flags {
     bool reassoc = true;         // shorten loop-carried add chains
     bool fuseReductions = false; // mac even on a reduction (fewer registers, longer chain)
     bool speculate = false;      // hoist pure work above branches
+    bool strength = true;        // strength-reduce induction-variable multiplies
     std::string name() const {
         return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "") +
-               (speculate ? "-spec" : "");
+               (speculate ? "-spec" : "") + (strength ? "" : "-nosr");
     }
 };
 
@@ -83,14 +84,23 @@ struct PassTimer {
         }
     }
 };
-#define TIMED(name, expr) ([&] { PassTimer pt_(name); return (expr); }())
+// KOPT_DISABLE=pass1,pass2 skips passes (developer aid for bisecting).
+bool passEnabled(const char *name) {
+    static const char *dis = getenv("KOPT_DISABLE");
+    if (!dis) return true;
+    std::string list = std::string(",") + dis + ",";
+    return list.find(std::string(",") + name + ",") == std::string::npos;
+}
+#define TIMED(name, expr) ([&] { if (!passEnabled(name)) return false; PassTimer pt_(name); return static_cast<bool>(expr); }())
 
 void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
     TIMED("simplifyCFG", simplifyCFG(f));
     if (level <= 0) return;
     for (int round = 0; round < 4; round++) {
         bool c = false;
+        TIMED("ivranges", (computeIVRanges(f), true));
         c |= TIMED("sccp", sccp(f));
+        c |= TIMED("combineLinear", combineLinear(f));
         c |= TIMED("simplifyCFG", simplifyCFG(f));
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("gvn", gvn(f));
@@ -102,6 +112,11 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         if (!c) break;
     }
     if (level >= 2) {
+        if (fl.strength && TIMED("strength", strengthReduce(f))) {
+            instSimplify(f);
+            gvn(f);
+            dce(f);
+        }
         if (fl.reassoc && TIMED("reassociate", reassociate(f))) {
             instSimplify(f);
             gvn(f);
@@ -152,7 +167,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     if (scratch) copy = f;
     BackendOptions bo;
     Cand c;
-    c.p = TIMED("lower", lowerToProgram(f, m, bo));
+    c.p = lowerToProgram(f, m, bo);
     if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
     c.what = tag;
     c.flags = fl;
@@ -246,16 +261,19 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     {
         std::vector<Cand> p1;
         // reassoc, fuseReductions, speculate
-        static const bool kVariants[][3] = {
-            {true, false, false}, {false, false, false}, {false, true, false}, {true, true, false},
-            {true, false, true}, {false, true, true},
+        // reassoc, fuseReductions, speculate, strength
+        static const bool kVariants[][4] = {
+            {true, false, false, true}, {false, false, false, true}, {false, true, false, true},
+            {true, true, false, true}, {true, false, true, true}, {false, true, true, true},
+            {true, false, false, false}, {false, true, false, false},
         };
-        const int nVariants = small ? 6 : 1;
+        const int nVariants = small ? 8 : 1;
         for (int v = 0; v < nVariants; v++) {
             Flags fl;
             fl.reassoc = kVariants[v][0];
             fl.fuseReductions = kVariants[v][1];
             fl.speculate = kVariants[v][2];
+            fl.strength = kVariants[v][3];
             compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), small, p1);
         }
         for (Cand &c : p1) quick(c);

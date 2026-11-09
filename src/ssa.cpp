@@ -7,6 +7,7 @@
 
 #include "cfg.h"
 #include "ir.h"
+#include "passes.h"
 
 namespace kopt {
 
@@ -56,6 +57,7 @@ void Func::resolveAll() {
 }
 
 bool buildSSA(const Program &p, Func &f, std::string &err) {
+    clearIVRanges();   // range facts belong to one function
     f = Func();
     f.name = p.name;
     // Dense register numbering.

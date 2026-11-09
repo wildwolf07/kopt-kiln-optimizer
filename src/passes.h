@@ -23,6 +23,12 @@ bool addressInRange(Func &f, Opnd addr);
 // region above it is free for the optimizer's own spill slots.)
 bool memoryAccessesBelow(Func &f, uint32_t limit);
 
+// Compute ranges of loop induction variables (used by every range query).
+void computeIVRanges(Func &f);
+void clearIVRanges();
+bool combineLinear(Func &f);      // merge like terms of add/sub/mul-by-constant trees
+bool strengthReduce(Func &f);    // i*c in a loop -> extra induction variable
+
 bool simplifyCFG(Func &f);         // fold constant branches, merge blocks, thread empty jumps
 bool sccp(Func &f);                // sparse conditional constant propagation
 bool instSimplify(Func &f);        // algebraic simplification + copy propagation + trivial phis

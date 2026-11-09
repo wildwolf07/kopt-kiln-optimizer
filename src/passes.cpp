@@ -115,10 +115,16 @@ uint64_t maskUpTo(uint64_t v) {
     return m;
 }
 
+// Ranges of loop induction variables (computeIVRanges). Facts about a value
+// stay true for as long as the value exists, so the table never goes stale;
+// values created later simply are not in it.
+std::vector<Range> gIVRange;
+
 Range rangeOf(const Func &f, const std::vector<DefSite> &ds, Opnd o, int depth) {
     Range full;
     if (o.isConst) return Range{o.c, o.c};
     if (depth <= 0) return full;
+    if (o.v >= 0 && o.v < static_cast<int>(gIVRange.size()) && !gIVRange[o.v].full()) return gIVRange[o.v];
     const Inst *x = defInst(f, ds, o);
     if (!x) {
         if (o.v < 0 || o.v >= static_cast<int>(ds.size())) return full;
@@ -220,6 +226,254 @@ Range rangeOf(const Func &f, const std::vector<DefSite> &ds, Opnd o, int depth) 
 }
 
 }  // namespace
+
+// Induction variables: a loop-header phi P = phi(init, P + c) with a small
+// constant step c > 0, where every iteration that continues has passed a test
+// "X < N" (X is P or P + c, N loop-invariant). If init and N are known
+// non-negative and N + c stays below 2^31, P never wraps and stays in
+// [lo(init), max(hi(init), hi(N) + c - 1)].
+void computeIVRanges(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    gIVRange.assign(f.nvals, Range());
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    for (int pass = 0; pass < 2; pass++) {   // twice: inner bounds may use outer IVs
+        std::vector<DefSite> ds = defSites(f);
+        for (size_t l = 0; l < li.loops.size(); l++) {
+            const LoopInfo::Loop &L = li.loops[l];
+            const int h = L.header;
+            if (irr[h] || L.latches.size() != 1) continue;
+            auto inL = [&](int b) { return b >= 0 && li.inLoop(b, static_cast<int>(l)); };
+            const int latch = L.latches[0];
+            // The exit tests: branches in the loop with one target outside.
+            std::vector<int> tests;
+            for (int b : L.blocks) {
+                const Inst &t = f.bb[b].term();
+                if (t.op == OP_BR && inL(t.tgt[0]) != inL(t.tgt[1])) tests.push_back(b);
+            }
+            for (const Phi &p : f.bb[h].phis) {
+                if (p.in.size() != 2) continue;
+                Opnd init, next;
+                bool haveInit = false, haveNext = false;
+                for (auto &in : p.in) {
+                    if (in.first == latch) { next = f.resolve(in.second); haveNext = true; }
+                    else if (!inL(in.first)) { init = f.resolve(in.second); haveInit = true; }
+                }
+                if (!haveInit || !haveNext || next.isConst) continue;
+                const Inst *nx = defInst(f, ds, next);
+                if (!nx || nx->op != OP_ADD) continue;
+                Opnd a0 = f.resolve(nx->a[0]), a1 = f.resolve(nx->a[1]);
+                uint32_t c;
+                if (!a0.isConst && a0.v == p.dst && a1.isConst) c = a1.c;
+                else if (!a1.isConst && a1.v == p.dst && a0.isConst) c = a0.c;
+                else continue;
+                if (c == 0 || c > 65536) continue;
+                Range ri = rangeOf(f, ds, init, 8);
+                if (ri.hi >= 0x80000000ull) continue;
+                // A dominating-every-latch test "X < N" whose in-loop side continues.
+                uint64_t bestHi = 0xFFFFFFFFull;
+                for (int tb : tests) {
+                    if (!d.dominates(tb, latch)) continue;
+                    const Inst &t = f.bb[tb].term();
+                    const Inst *cmp = defInst(f, ds, f.resolve(t.a[0]));
+                    if (!cmp || cmp->op != OP_LT) continue;
+                    Opnd X = f.resolve(cmp->a[0]), N = f.resolve(cmp->a[1]);
+                    bool xIsP = !X.isConst && X.v == p.dst, xIsNext = X == next;
+                    if (!xIsP && !xIsNext) continue;
+                    if (!inL(t.tgt[0]) || inL(t.tgt[1])) continue;   // true must stay in the loop
+                    if (!N.isConst) {
+                        const DefSite &nd = ds[N.v];
+                        if (nd.block >= 0 && inL(nd.block)) continue;   // N must be invariant
+                    }
+                    Range rn = rangeOf(f, ds, N, 8);
+                    if (rn.hi + c >= 0x80000000ull) continue;
+                    bestHi = std::min<uint64_t>(bestHi, std::max<uint64_t>(ri.hi, rn.hi + c - 1));
+                }
+                if (bestHi < 0x80000000ull) gIVRange[p.dst] = Range{ri.lo, bestHi};
+            }
+        }
+    }
+}
+
+void clearIVRanges() { gIVRange.clear(); }
+
+// ---------------------------------------------------------------------------
+// Linear combination: a tree of add/sub/mul-by-constant/shl-by-constant whose
+// inner nodes are used only inside the tree is a sum of (coefficient x value)
+// terms plus a constant. Equal values are merged (x*8 + x*10 + x*3 + x*16 =
+// x*37). Exact: multiplication distributes over addition modulo 2^32.
+// ---------------------------------------------------------------------------
+
+bool combineLinear(Func &f) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    std::vector<int> uses(f.nvals, 0);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+        for (Inst &x : B.insts) for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) uses[x.a[a].v]++;
+    }
+    auto isLin = [](const Inst *x) {
+        if (!x) return false;
+        if (x->op == OP_ADD || x->op == OP_SUB) return true;
+        if ((x->op == OP_MUL || x->op == OP_SHL) && x->a[1].isConst) return true;
+        return false;
+    };
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        if (!f.bb[b].alive) continue;
+        std::vector<std::pair<size_t, std::vector<Inst>>> inserts;
+        const size_t nins = f.bb[b].insts.size();
+        for (size_t i = 0; i < nins; i++) {
+            const Inst root = f.bb[b].insts[i];
+            if (root.op != OP_ADD && root.op != OP_SUB) continue;
+            // Gather terms: (coefficient, operand).
+            std::vector<std::pair<uint32_t, Opnd>> terms;
+            uint32_t konst = 0;
+            int inner = 0, leaves = 0;
+            struct Item { Opnd o; uint32_t k; bool top; };
+            std::vector<Item> work;
+            work.push_back({root.a[0], 1u, true});
+            work.push_back({root.a[1], root.op == OP_SUB ? 0xFFFFFFFFu : 1u, true});
+            while (!work.empty()) {
+                Item it = work.back();
+                work.pop_back();
+                if (it.o.isConst) { konst += it.k * it.o.c; leaves++; continue; }
+                const Inst *d = defInst(f, ds, it.o);
+                if (isLin(d) && uses[it.o.v] == 1 && ds[it.o.v].block == b && inner < 24) {
+                    inner++;
+                    if (d->op == OP_ADD) { work.push_back({d->a[0], it.k, false}); work.push_back({d->a[1], it.k, false}); }
+                    else if (d->op == OP_SUB) { work.push_back({d->a[0], it.k, false}); work.push_back({d->a[1], 0u - it.k, false}); }
+                    else if (d->op == OP_MUL) work.push_back({d->a[0], it.k * d->a[1].c, false});
+                    else work.push_back({d->a[0], it.k * (1u << (d->a[1].c & 31)), false});
+                    continue;
+                }
+                leaves++;
+                bool merged = false;
+                for (auto &t : terms) if (t.second == it.o) { t.first += it.k; merged = true; }
+                if (!merged) terms.push_back({it.k, it.o});
+            }
+            // Only rewrite if something merged or cancelled.
+            size_t nonzero = 0;
+            for (auto &t : terms) if (t.first != 0) nonzero++;
+            if (inner == 0 || nonzero + (konst != 0 ? 1 : 0) >= static_cast<size_t>(leaves)) continue;
+            std::vector<Inst> pre;
+            auto emit = [&](Op op, Opnd a, Opnd c) {
+                Inst x;
+                x.op = op; x.dst = f.newVal(); x.n = 2; x.a[0] = a; x.a[1] = c;
+                pre.push_back(x);
+                return Opnd::val(x.dst);
+            };
+            Opnd acc;
+            bool have = false;
+            std::vector<Opnd> negs;
+            for (auto &t : terms) {
+                if (t.first == 0) continue;
+                bool neg = t.first >= 0x80000000u && t.first != 0x80000000u;
+                uint32_t mag = neg ? 0u - t.first : t.first;
+                Opnd term = (mag == 1) ? t.second : emit(OP_MUL, t.second, Opnd::cst(mag));
+                if (neg) { negs.push_back(term); continue; }
+                acc = have ? emit(OP_ADD, acc, term) : term;
+                have = true;
+            }
+            for (Opnd n : negs) {
+                acc = have ? emit(OP_SUB, acc, n) : emit(OP_SUB, Opnd::cst(0), n);
+                have = true;
+            }
+            if (!have) acc = Opnd::cst(konst);
+            else if (konst != 0) acc = emit(OP_ADD, acc, Opnd::cst(konst));
+            // The root becomes a copy of the new sum.
+            Inst &r = f.bb[b].insts[i];
+            r.op = OP_ADD; r.n = 2; r.a[0] = acc; r.a[1] = Opnd::cst(0);
+            if (!pre.empty()) inserts.push_back({i, pre});
+            changed = true;
+        }
+        for (auto it = inserts.rbegin(); it != inserts.rend(); ++it) {
+            auto &ins = f.bb[b].insts;
+            ins.insert(ins.begin() + it->first, it->second.begin(), it->second.end());
+        }
+        if (!inserts.empty()) {
+            ds = defSites(f);
+            uses.resize(f.nvals, 0);
+        }
+    }
+    return changed;
+}
+
+// ---------------------------------------------------------------------------
+// Strength reduction: inside a loop, x = P * c for an induction variable
+// P = phi(init, P + s) becomes a second induction variable
+// Q = phi(init * c, Q + s * c). Exact modulo 2^32.
+// ---------------------------------------------------------------------------
+
+bool strengthReduce(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    std::vector<DefSite> ds = defSites(f);
+    bool changed = false;
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        const int h = L.header;
+        if (irr[h] || L.latches.size() != 1) continue;
+        auto inL = [&](int b) { return b >= 0 && li.inLoop(b, static_cast<int>(l)); };
+        const int latch = L.latches[0];
+        std::vector<int> outside;
+        for (int p : f.bb[h].preds) if (!inL(p)) outside.push_back(p);
+        if (outside.size() != 1) continue;
+        const size_t nphis = f.bb[h].phis.size();
+        for (size_t pi = 0; pi < nphis; pi++) {
+            const Phi p = f.bb[h].phis[pi];
+            if (p.in.size() != 2) continue;
+            Opnd init, next;
+            for (auto &in : p.in) {
+                if (in.first == latch) next = f.resolve(in.second);
+                else init = f.resolve(in.second);
+            }
+            if (next.isConst) continue;
+            const Inst *nx = defInst(f, ds, next);
+            if (!nx || nx->op != OP_ADD) continue;
+            Opnd a0 = f.resolve(nx->a[0]), a1 = f.resolve(nx->a[1]);
+            uint32_t step;
+            if (!a0.isConst && a0.v == p.dst && a1.isConst) step = a1.c;
+            else if (!a1.isConst && a1.v == p.dst && a0.isConst) step = a0.c;
+            else continue;
+            const int nextBlock = ds[next.v].block;
+            if (!init.isConst) continue;   // keep it simple: constant start
+            // Multiplications of P by a constant inside the loop.
+            for (int b : L.blocks) {
+                for (size_t i = 0; i < f.bb[b].insts.size(); i++) {
+                    Inst &x = f.bb[b].insts[i];
+                    if (x.op != OP_MUL || !x.a[1].isConst || x.a[0].isConst || f.resolve(x.a[0]) != Opnd::val(p.dst)) continue;
+                    const uint32_t c = x.a[1].c;
+                    const Val q = f.newVal(), qn = f.newVal();
+                    Phi qp;
+                    qp.dst = q;
+                    for (auto &in : p.in)
+                        qp.in.push_back({in.first, in.first == latch ? Opnd::val(qn) : Opnd::cst(init.c * c)});
+                    Inst inc;
+                    inc.op = OP_ADD; inc.dst = qn; inc.n = 2; inc.a[0] = Opnd::val(q); inc.a[1] = Opnd::cst(step * c);
+                    // Q + s*c goes right after P + s (same block, so it reaches the latch).
+                    std::vector<Inst> &nb = f.bb[nextBlock].insts;
+                    size_t pos = 0;
+                    while (pos < nb.size() && nb[pos].dst != next.v) pos++;
+                    nb.insert(nb.begin() + std::min(pos + 1, nb.size() - 1), inc);
+                    f.replaceAll(x.dst, Opnd::val(q));
+                    f.bb[h].phis.push_back(qp);
+                    ds = defSites(f);
+                    changed = true;
+                    break;   // instruction lists changed; continue with the next block
+                }
+            }
+        }
+    }
+    if (changed) f.resolveAll();
+    return changed;
+}
 
 bool memoryAccessesBelow(Func &f, uint32_t limit) {
     f.resolveAll();
@@ -1477,9 +1731,13 @@ bool ifConvert(Func &f, const Machine &m) {
                 A.insts.push_back(sel);
                 v = Opnd::val(sel.dst);
             }
+            // Drop the inputs of the removed arms and of a itself; keep every
+            // other predecessor (the join may even be its own predecessor).
             std::vector<std::pair<int, Opnd>> keep;
-            for (auto &in : ph.in)
-                if (in.first != t && in.first != e && in.first != a) keep.push_back(in);
+            for (auto &in : ph.in) {
+                bool fromArm = std::find(arms.begin(), arms.end(), in.first) != arms.end();
+                if (!fromArm && in.first != a) keep.push_back(in);
+            }
             keep.push_back({a, v});
             ph.in.swap(keep);
         }
