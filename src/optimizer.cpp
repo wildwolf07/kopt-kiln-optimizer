@@ -66,9 +66,10 @@ struct Flags {
     bool speculate = false;      // hoist pure work above branches
     bool strength = true;        // strength-reduce induction-variable multiplies
     bool loadPhis = false;       // loads at merges -> phis of known values
+    bool storeSel = false;       // conditional stores with known old values -> select + store
     std::string name() const {
         return std::string(reassoc ? "" : "-noreassoc") + (fuseReductions ? "-macred" : "") +
-               (speculate ? "-spec" : "") + (strength ? "" : "-nosr") + (loadPhis ? "-lp" : "");
+               (speculate ? "-spec" : "") + (strength ? "" : "-nosr") + (loadPhis ? "-lp" : "") + (storeSel ? "-ss" : "");
     }
 };
 
@@ -115,7 +116,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("gvn", gvn(f));
         if (level >= 2 && fl.loadPhis && passEnabled("loadphis")) c |= TIMED("loadPhis", loadPhis(f));
-        if (level >= 2 && fl.loadPhis && passEnabled("storeselect")) c |= TIMED("storeSelect", storeSelect(f));
+        if (level >= 2 && fl.storeSel && passEnabled("storeselect")) c |= TIMED("storeSelect", storeSelect(f));
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("dce", dce(f));
         c |= TIMED("deadStores", deadStores(f));
@@ -645,14 +646,16 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         for (const Cand &c : cands) if (c.ok) best.push_back(&c);
         std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
         std::vector<Cand> more;
-        for (size_t i = 0; i < std::min<size_t>(3, best.size()); i++) {
-            Flags fl = best[i]->flags;
-            fl.loadPhis = true;
-            std::vector<Cand> got;
-            compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + "/lp", true, got);
-            for (Cand &c : got) quick(c);
-            for (Cand &c : got) more.push_back(std::move(c));
-        }
+        for (size_t i = 0; i < std::min<size_t>(3, best.size()); i++)
+            for (int ss = 0; ss < 2; ss++) {
+                Flags fl = best[i]->flags;
+                fl.loadPhis = true;
+                fl.storeSel = ss == 1;
+                std::vector<Cand> got;
+                compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + (ss ? "/ss" : "/lp"), true, got);
+                for (Cand &c : got) quick(c);
+                for (Cand &c : got) more.push_back(std::move(c));
+            }
         for (Cand &c : more) cands.push_back(std::move(c));
     }
     if (effort == 2 && passEnabled("tracelayout")) {
