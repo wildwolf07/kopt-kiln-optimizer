@@ -310,7 +310,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             {"unroll1", 1, 0, false, 0}, {"unroll2", 2, 0, false, 0}, {"unroll4", 4, 0, false, 0},
             {"unroll8", 8, 0, false, 0}, {"thread", 0, 0, true, 0}, {"peel8", 0, 8, true, 0},
             {"peel16", 0, 16, true, 0}, {"cunroll2", 1, 0, false, 2}, {"cunroll4", 1, 0, false, 4},
-            {"cunroll8", 1, 0, false, 8},
+            {"cunroll8", 1, 0, false, 8}, {"cunroll4r", 1, 0, false, -4}, {"cunroll8r", 1, 0, false, -8},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
@@ -324,7 +324,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                     any |= rotateLoops(rf, 8);
                     if (pl.counted) {
                         // every innermost counted loop, one at a time
-                        if (!countedUnroll(rf, names, pl.counted, 2 * budget)) continue;
+                        if (!countedUnroll(rf, names, std::abs(pl.counted), 2 * budget, pl.counted < 0)) continue;
                         any = true;
                     } else {
                         any |= unrollLoops(rf, pl.unroll, budget);

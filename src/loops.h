@@ -45,6 +45,7 @@ bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs);
 // n - i > (factor-1)*s (signed; a wrapped difference just picks the original
 // loop). The original loop stays as the remainder. New registers get names
 // appended to regNames.
-bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget);
+bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget,
+                   bool chainRemainder = false);
 
 }  // namespace kopt

@@ -283,7 +283,7 @@ bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs) {
     return changed;
 }
 
-bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget) {
+bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget, bool chainRemainder) {
     if (factor < 2) return false;
     f.rebuildPreds();
     DomInfo d = computeDominators(f);
@@ -424,6 +424,33 @@ bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int siz
             }
             Inst &term = f.bb[clone[k][t]].term();   // br c, h, EXIT  ->  jump on
             term.op = OP_JMP; term.n = 0; term.tgt[0] = (k + 1 < factor) ? clone[k + 1][h] : D; term.tgt[1] = -1;
+        }
+        // The remainder (the original loop) runs fewer than `factor` times
+        // whenever the groups ran, so unroll it into factor-1 copies in a chain:
+        // each copy keeps its exit test, and the back edge is taken only when
+        // the guard f0 was false.
+        if (chainRemainder && factor > 2 && size * (2 * factor) <= sizeBudget) {
+            const int rf = factor - 1;
+            std::vector<std::unordered_map<int, int>> rc(rf);
+            for (int b : L.blocks) rc[0][b] = b;
+            for (int k = 1; k < rf; k++)
+                for (int b : L.blocks) {
+                    rc[k][b] = static_cast<int>(f.bb.size());
+                    BB copy = f.bb[b];
+                    copy.label.clear();
+                    f.bb.push_back(copy);
+                }
+            for (int k = 0; k < rf; k++)
+                for (int b : L.blocks) {
+                    Inst &tt = f.bb[rc[k][b]].term();
+                    int nt = (tt.op == OP_JMP) ? 1 : (tt.op == OP_BR ? 2 : 0);
+                    for (int s2 = 0; s2 < nt; s2++) {
+                        int target = tt.tgt[s2];
+                        if (target >= n0 || !in[target]) continue;   // exit edge
+                        if (target == h) tt.tgt[s2] = rc[(k + 1) % rf][h];
+                        else tt.tgt[s2] = rc[k][target];
+                    }
+                }
         }
         // Entries from outside the loop go through P. The original loop stays as
         // the remainder (entered from R, or from D's false side through R).
