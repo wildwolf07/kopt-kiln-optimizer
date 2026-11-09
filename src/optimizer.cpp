@@ -302,22 +302,56 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         std::vector<Flags> baseFlags;
         for (const Cand *b : bases) { basePrograms.push_back(b->p); baseNames.push_back(b->what); baseFlags.push_back(b->flags); }
         const int budget = std::max(24, m.icache_size);
-        const int factors[] = {1, 2, 4, 8};
+        // Register-form transforms: rotate+unroll by 1/2/4/8, jump threading,
+        // and full peeling of short loops (constant trip counts fold away).
+        struct Plan { const char *name; int unroll; int peel; bool thread; };
+        static const Plan plans[] = {
+            {"unroll1", 1, 0, false}, {"unroll2", 2, 0, false}, {"unroll4", 4, 0, false},
+            {"unroll8", 8, 0, false}, {"thread", 0, 0, true}, {"peel8", 0, 8, true}, {"peel16", 0, 16, true},
+        };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
-            for (int u : factors) {
+            for (const Plan &pl : plans) {
                 std::vector<uint32_t> names;
                 Func rf = toRegisterForm(basePrograms[bi], names);
-                bool rot = rotateLoops(rf, 8);
-                bool unr = unrollLoops(rf, u, budget);
-                if (!rot && !unr) continue;
+                bool any = false;
+                if (pl.peel) any |= peelLoops(rf, pl.peel, 2 * std::max(64, m.icache_size));
+                if (pl.thread) any |= threadJumps(rf, 12, 256);
+                if (pl.unroll) {
+                    any |= rotateLoops(rf, 8);
+                    any |= unrollLoops(rf, pl.unroll, budget);
+                }
+                if (!any) continue;
                 Program transformed = fromRegisterForm(rf, names);
-                compileVariants(transformed, m, opt.maxLevel, baseFlags[bi],
-                                baseNames[bi] + "/unroll" + std::to_string(u), true, p2);
+                compileVariants(transformed, m, opt.maxLevel, baseFlags[bi], baseNames[bi] + "/" + pl.name, true, p2);
             }
         }
         for (Cand &c : p2) quick(c);
         for (Cand &c : p2) cands.push_back(std::move(c));
+
+        // Phase 3: jump threading on the best programs so far (after unrolling
+        // and constant folding, repeated tests of one condition become visible).
+        // Two rounds: each recompile can expose more known branches.
+        for (int round = 0; round < 2; round++) {
+            std::vector<const Cand *> top;
+            for (const Cand &c : cands) if (c.ok) top.push_back(&c);
+            std::stable_sort(top.begin(), top.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+            if (top.size() > 3) top.resize(3);
+            std::vector<std::pair<Program, std::pair<std::string, Flags>>> work;
+            for (const Cand *c : top) work.push_back({c->p, {c->what, c->flags}});
+            std::vector<Cand> p3;
+            for (auto &w : work) {
+                if (w.second.first.size() > 120) continue;
+                std::vector<uint32_t> names;
+                Func rf = toRegisterForm(w.first, names);
+                if (!threadJumps(rf, 16, 512)) continue;
+                Program transformed = fromRegisterForm(rf, names);
+                compileVariants(transformed, m, opt.maxLevel, w.second.second, w.second.first + "/thread", true, p3);
+            }
+            if (p3.empty()) break;
+            for (Cand &c : p3) quick(c);
+            for (Cand &c : p3) cands.push_back(std::move(c));
+        }
     }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {

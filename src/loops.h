@@ -28,4 +28,14 @@ bool rotateLoops(Func &f, int maxHeaderSize);
 // copy). Loops whose replicated size would exceed sizeBudget are left alone.
 bool unrollLoops(Func &f, int factor, int sizeBudget);
 
+// Peel `count` iterations of innermost loops: copies of the body run first,
+// then the original loop. With a constant trip count <= count, constant
+// propagation later removes the loop entirely.
+bool peelLoops(Func &f, int count, int sizeBudget);
+
+// Jump threading: when the outcome of a block's branch is already known on an
+// incoming edge (the register was just tested, or set to a constant), that
+// edge gets its own copy of the block ending in a plain jump.
+bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs);
+
 }  // namespace kopt

@@ -155,4 +155,132 @@ bool unrollLoops(Func &f, int factor, int sizeBudget) {
     return changed;
 }
 
+bool peelLoops(Func &f, int count, int sizeBudget) {
+    if (count < 1) return false;
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    bool changed = false;
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        bool innermost = true;
+        for (size_t o = 0; o < li.loops.size(); o++)
+            if (o != l && li.loops[o].parent == static_cast<int>(l)) innermost = false;
+        if (!innermost || irr[L.header] || L.header == 0) continue;
+        int size = 0;
+        for (int b : L.blocks) size += static_cast<int>(f.bb[b].insts.size());
+        if (size * count > sizeBudget) continue;
+        const int n0 = static_cast<int>(f.bb.size());
+        std::vector<char> in(n0, 0);
+        for (int b : L.blocks) in[b] = 1;
+        // clone[k][b]: peeled copy k (1..count) of block b.
+        std::vector<std::unordered_map<int, int>> clone(count + 1);
+        for (int k = 1; k <= count; k++)
+            for (int b : L.blocks) {
+                clone[k][b] = static_cast<int>(f.bb.size());
+                BB copy = f.bb[b];
+                copy.label.clear();
+                f.bb.push_back(copy);
+            }
+        for (int k = 1; k <= count; k++)
+            for (int b : L.blocks) {
+                Inst &t = f.bb[clone[k][b]].term();
+                int nt = (t.op == OP_JMP) ? 1 : (t.op == OP_BR ? 2 : 0);
+                for (int s2 = 0; s2 < nt; s2++) {
+                    int target = t.tgt[s2];
+                    if (target >= n0 || !in[target]) continue;   // exit: unchanged
+                    if (target == L.header) t.tgt[s2] = (k < count) ? clone[k + 1][L.header] : L.header;
+                    else t.tgt[s2] = clone[k][target];
+                }
+            }
+        // Entries from outside the loop go to the first peeled copy.
+        for (int b = 0; b < n0; b++) {
+            if (in[b] || !f.bb[b].alive) continue;
+            Inst &t = f.bb[b].term();
+            int nt = (t.op == OP_JMP) ? 1 : (t.op == OP_BR ? 2 : 0);
+            for (int s2 = 0; s2 < nt; s2++)
+                if (t.tgt[s2] == L.header) t.tgt[s2] = clone[1][L.header];
+        }
+        changed = true;
+    }
+    if (changed) f.rebuildPreds();
+    return changed;
+}
+
+namespace {
+
+// Does `b` write register r?
+bool writes(const BB &b, int r) {
+    for (const Inst &x : b.insts) if (x.dst == r) return true;
+    return false;
+}
+
+// Known truth of register r at the end of block p, or -1 if unknown.
+int knownAtEnd(const Func &f, int p, int r, int depth) {
+    const BB &P = f.bb[p];
+    for (int i = static_cast<int>(P.insts.size()) - 1; i >= 0; i--) {
+        const Inst &x = P.insts[i];
+        if (x.dst != r) continue;
+        if (x.op == OP_MOV && x.a[0].isConst) return x.a[0].c != 0 ? 1 : 0;
+        return -1;
+    }
+    if (depth <= 0 || P.preds.size() != 1) return -1;
+    const int q = P.preds[0];
+    const Inst &t = f.bb[q].term();
+    // q's branch reads r at q's very end, and p does not write r: same value.
+    if (t.op == OP_BR && !t.a[0].isConst && t.a[0].v == r && t.tgt[0] != t.tgt[1])
+        return t.tgt[0] == p ? 1 : 0;
+    return knownAtEnd(f, q, r, depth - 1);
+}
+
+}  // namespace
+
+bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs) {
+    f.rebuildPreds();
+    bool changed = false;
+    int added = 0;
+    for (int round = 0; round < 8 && added < maxNewInstrs; round++) {
+        bool any = false;
+        const int n0 = static_cast<int>(f.bb.size());
+        for (int b = 1; b < n0 && added < maxNewInstrs; b++) {
+            BB &B = f.bb[b];
+            if (!B.alive || B.term().op != OP_BR || B.term().a[0].isConst) continue;
+            if (static_cast<int>(B.insts.size()) > maxBlockSize) continue;
+            const int r = B.term().a[0].v;
+            if (writes(B, r)) continue;   // the tested value is computed in B itself
+            std::vector<int> preds = f.bb[b].preds;
+            for (int p : preds) {
+                if (p == b) continue;
+                int known = -1;
+                const Inst &pt = f.bb[p].term();
+                if (pt.op == OP_BR && !pt.a[0].isConst && pt.a[0].v == r && pt.tgt[0] != pt.tgt[1])
+                    known = (pt.tgt[0] == b) ? 1 : 0;   // p just tested r and came here
+                else
+                    known = knownAtEnd(f, p, r, 4);
+                if (known < 0) continue;
+                const int nb = static_cast<int>(f.bb.size());
+                BB copy = f.bb[b];
+                copy.label.clear();
+                Inst &t = copy.term();
+                const int target = known ? t.tgt[0] : t.tgt[1];
+                t.op = OP_JMP;
+                t.n = 0;
+                t.tgt[0] = target;
+                t.tgt[1] = -1;
+                added += static_cast<int>(copy.insts.size());
+                f.bb.push_back(copy);
+                Inst &ptm = f.bb[p].term();
+                int nt = (ptm.op == OP_JMP) ? 1 : (ptm.op == OP_BR ? 2 : 0);
+                for (int s2 = 0; s2 < nt; s2++) if (ptm.tgt[s2] == b) ptm.tgt[s2] = nb;
+                any = changed = true;
+                f.rebuildPreds();
+            }
+        }
+        if (!any) break;
+    }
+    if (changed) f.rebuildPreds();
+    return changed;
+}
+
 }  // namespace kopt
