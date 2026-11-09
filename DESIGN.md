@@ -54,8 +54,8 @@ winning candidate is checked on additional inputs before being written.
 
 Missing or partial: no software pipelining, unrestricted cross-block scheduling,
 full partial-redundancy elimination or general alias analysis. Counted-loop
-recognition is deliberately restricted. The supplied profile file is accepted
-but not used. Finite self-checking is not a proof of equivalence.
+recognition is deliberately restricted. The profile only steers which inputs
+rank candidates (section 6). Finite self-checking is not a proof of equivalence.
 
 ## 2. Pass order
 
@@ -179,12 +179,26 @@ stored in `.in` files run in addition to generated cases. Sanitizer builds use
 
 ## 6. Profiles
 
-The supplied `--profile` file is read but currently unused. Initial layout uses
-loop estimates. Additional layout candidates collect block and edge frequencies
-by running our fixed typical inputs, then are ranked with the exact simulator.
-Neither supplied profiles nor sampled executions establish semantic facts.
-A misleading prediction can choose a slower layout, but it cannot remove effects,
-change arithmetic or bypass a required trap.
+The profile only changes which inputs rank the candidates; it never changes
+what a candidate is allowed to do.
+
+1. Parse `edge FROM TO COUNT` lines whose labels name blocks of the input
+   program. Lines that do not parse or name unknown blocks are ignored. If no
+   edge remains (or the program has more than 4,000 instructions), the profile
+   is ignored.
+2. Run the input program on a fixed pool of 64 inputs (48 typical, 16
+   generated) and count its block-to-block edges.
+3. Distance of a run to the profile: the sum of |log2(1+run count) -
+   log2(1+profile count)| over the profile's edges, plus log2(1+count) for each
+   edge the profile does not list.
+4. The 8 nearest pool inputs (ties by pool order) replace the second half of
+   the 16 timing inputs. The first 8 typical inputs always stay.
+
+When the profile is wrong, half of the ranking still comes from ordinary
+inputs, so it can shift the choice but never decide it alone. Every
+candidate is still checked on the full input set. Initial layout uses loop
+estimates, and the layout candidates use frequencies from our own fixed
+inputs. Neither profiles nor sampled runs establish semantic facts.
 
 ## 7. Known problems
 
@@ -197,4 +211,5 @@ change arithmetic or bypass a required trap.
 - Scheduling is local except for bounded speculative hoisting. No general
   software pipelining or scheduling across arbitrary joins is implemented.
 - Finite self-checking and testing cannot establish universal equivalence.
-- Supplied branch profiles are not yet used as search hints.
+- Profiles only steer the choice of timing inputs; they are not used for
+  layout or spill costs directly.

@@ -1,6 +1,10 @@
 // optimizer.cpp - pass pipeline, candidate selection and self-verification.
 #include "optimizer.h"
 
+#include <cmath>
+#include <map>
+#include <sstream>
+
 #include <cstdio>
 
 #include <algorithm>
@@ -354,9 +358,45 @@ Program canonicalize(const Program &p) {
     return q;
 }
 
+// Profile hint: "edge FROM TO COUNT" lines naming blocks of the input program.
+// Returns the counts keyed by (from block, to block) indices of `p`; empty when
+// the profile is missing or names no edge of this program.
+std::map<std::pair<int, int>, double> parseProfile(const std::string &text, const Program &p) {
+    std::map<std::string, int> idx;
+    for (size_t b = 0; b < p.blocks.size(); b++) idx[p.blocks[b].label] = static_cast<int>(b);
+    std::map<std::pair<int, int>, double> out;
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string kw, from, to;
+        double count;
+        if (!(ls >> kw >> from >> to >> count) || kw != "edge" || count < 0) continue;
+        auto a = idx.find(from), b = idx.find(to);
+        if (a == idx.end() || b == idx.end()) continue;
+        out[{a->second, b->second}] += count;
+    }
+    return out;
+}
+
+// Edge counts of one run (from its instruction trace).
+std::map<std::pair<int, int>, double> edgeCounts(const Program &p, const std::vector<uint32_t> &trace) {
+    std::vector<int> blockOf;
+    for (size_t b = 0; b < p.blocks.size(); b++)
+        for (size_t i = 0; i < p.blocks[b].ins.size(); i++) blockOf.push_back(static_cast<int>(b));
+    std::map<std::pair<int, int>, double> out;
+    for (size_t i = 1; i < trace.size(); i++) {
+        const int a = blockOf[trace[i - 1]], b = blockOf[trace[i]];
+        const Block &blk = p.blocks[static_cast<size_t>(a)];
+        if (trace[i - 1] + 1 == trace[i] && a == b) continue;
+        if (!isTerminator(blk.ins.back().op)) continue;
+        out[{a, b}] += 1;
+    }
+    return out;
+}
+
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
-    (void)profileText;
     const Program canon = canonicalize(orig);
     const Program base = usesUnsupported(canon, m) ? legalize(canon, m) : canon;
     SimProgram so(base);
@@ -370,6 +410,36 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     const uint64_t stepLimit = std::min<uint64_t>(6000000, std::max<uint64_t>(200000, 30 * progSize));
     const int nCheck = progSize > 4000 ? 16 : opt.checkInputs;
     std::vector<Input> inputs = typicalInputs(np, 16, 0x74797069ull);
+    // With a usable profile, half of the timing sample becomes the pool inputs
+    // whose runs of the input program look most like the profile (log-scale
+    // edge-count distance). The other half stays as it is, so a wrong profile
+    // can only shift the choice, never decide it alone.
+    if (!profileText.empty() && progSize <= 4000 && passEnabled("profile")) {
+        const auto prof = parseProfile(profileText, orig);
+        if (!prof.empty()) {
+            SimProgram sp(orig);
+            std::vector<Input> pool = typicalInputs(np, 48, 0x70726f66ull);
+            std::vector<Input> g2 = generateInputs(np, 16, 0x70726f67ull);
+            pool.insert(pool.end(), g2.begin(), g2.end());
+            std::vector<std::pair<double, size_t>> dist;
+            for (size_t i = 0; i < pool.size(); i++) {
+                RunResult r = sp.run(pool[i], stepLimit, true);
+                if (r.status == Status::TIMEOUT) continue;
+                auto ec = edgeCounts(orig, r.trace);
+                double d = 0;
+                for (const auto &e : prof) {
+                    auto it = ec.find(e.first);
+                    const double c = it == ec.end() ? 0 : it->second;
+                    d += std::fabs(std::log2(1 + c) - std::log2(1 + e.second));
+                }
+                for (const auto &e : ec)
+                    if (!prof.count(e.first)) d += std::log2(1 + e.second);
+                dist.push_back({d, i});
+            }
+            std::sort(dist.begin(), dist.end());
+            for (size_t k = 0; k < 8 && k < dist.size(); k++) inputs[8 + k] = pool[dist[k].second];
+        }
+    }
     std::vector<Input> gen = generateInputs(np, nCheck, 0x6b6f7074ull);
     inputs.insert(inputs.end(), gen.begin(), gen.end());
     std::vector<Input> more = generateInputs(np, nCheck / 2, 0x4b494c4eull);
