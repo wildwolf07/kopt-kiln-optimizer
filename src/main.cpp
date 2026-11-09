@@ -203,6 +203,7 @@ int main(int argc, char **argv) {
 
     Options opt;
     opt.verbose = getenv("KOPT_VERBOSE") != nullptr;
+    opt.strict = getenv("KOPT_STRICT") != nullptr;
     std::string result = optimizeProgram(inText, prog, m, profText, opt);
     if (!writeFile(out, result)) die("cannot write " + out);
     return 0;

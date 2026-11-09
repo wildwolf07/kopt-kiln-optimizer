@@ -150,6 +150,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fprintf(stderr, "kopt: %-14s %s, cycles %llu (input %llu), %zu instrs\n", what,
                     c.ok ? "ok" : c.why.c_str(), static_cast<unsigned long long>(c.cycles),
                     static_cast<unsigned long long>(baseCycles), cand.instrCount());
+        if (!c.ok && opt.strict) {
+            // Testing mode: a candidate that fails the self-check is a bug even
+            // though the fallback would hide it from the output.
+            fprintf(stderr, "kopt: STRICT: %s failed self-check: %s\n", what, c.why.c_str());
+            exit(3);
+        }
         if (c.ok && c.cycles < bestCycles) {
             best = printProgram(cand);
             bestCycles = c.cycles;

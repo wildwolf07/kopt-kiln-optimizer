@@ -13,6 +13,7 @@ namespace kopt {
 struct Options {
     int maxLevel = 3;          // highest pipeline level to try
     bool verbose = false;      // diagnostics to stderr
+    bool strict = false;       // testing: fail loudly when a candidate fails the self-check
     int checkInputs = 64;      // generated inputs for the self-check
 };
 
