@@ -1504,6 +1504,7 @@ bool simplifyOne(Func &f, const std::vector<DefSite> &ds, Inst &x, Opnd *repl, b
         return false;
     case OP_DIV:
         if (B.isC(1)) { *repl = A; return true; }
+        if (A == B && !A.isConst && rangeOf(f, ds, A, 6).lo > 0) { *repl = Opnd::cst(1); return true; }   // x / x, x != 0
         if (B.isC(0xFFFFFFFFu)) return setOp(OP_SUB, Opnd::cst(0), A);
         if (B.isConst && B.c != 0 && B.c < 0x80000000u && isPow2(B.c)) {
             Range r = rangeOf(f, ds, A, 6);
@@ -1512,6 +1513,7 @@ bool simplifyOne(Func &f, const std::vector<DefSite> &ds, Inst &x, Opnd *repl, b
         return false;
     case OP_MOD:
         if (B.isC(1) || B.isC(0xFFFFFFFFu)) { *repl = Opnd::cst(0); return true; }
+        if (A == B && !A.isConst && rangeOf(f, ds, A, 6).lo > 0) { *repl = Opnd::cst(0); return true; }   // x % x, x != 0
         if (B.isConst && B.c != 0 && B.c < 0x80000000u && isPow2(B.c)) {
             Range r = rangeOf(f, ds, A, 6);
             if (r.hi < 0x80000000ull) return setOp(OP_AND, A, Opnd::cst(B.c - 1));
@@ -1579,6 +1581,11 @@ bool instSimplify(Func &f) {
                             x.a[0] = f.resolve(c->a[1]);
                             std::swap(x.tgt[0], x.tgt[1]);
                             again = true;
+                        } else {
+                            // A condition whose value range excludes 0 is always true.
+                            const Range r = rangeOf(f, ds, x.a[0], 6);
+                            if (r.lo > 0) { x.a[0] = Opnd::cst(1); again = true; }
+                            else if (r.hi == 0) { x.a[0] = Opnd::cst(0); again = true; }
                         }
                     }
                     continue;
