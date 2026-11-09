@@ -1468,9 +1468,20 @@ bool simplifyOne(Func &f, const std::vector<DefSite> &ds, Inst &x, Opnd *repl, b
         if (A.isC(0x7FFFFFFFu)) { *repl = Opnd::cst(0); return true; }     // INT_MAX < nothing
         {
             Range ra = rangeOf(f, ds, A, 6), rb = rangeOf(f, ds, B, 6);
-            if (ra.hi < 0x80000000ull && rb.hi < 0x80000000ull) {
-                if (ra.hi < rb.lo) { *repl = Opnd::cst(1); return true; }
-                if (ra.lo >= rb.hi) { *repl = Opnd::cst(0); return true; }
+            // An unsigned range that stays inside one half of [0, 2^32) is
+            // also a signed interval (the upper half is negative).
+            auto toSigned = [](const Range &r, int64_t &lo, int64_t &hi) {
+                if (r.hi < 0x80000000ull) { lo = static_cast<int64_t>(r.lo); hi = static_cast<int64_t>(r.hi); return true; }
+                if (r.lo >= 0x80000000ull) {
+                    lo = static_cast<int64_t>(r.lo) - 0x100000000ll; hi = static_cast<int64_t>(r.hi) - 0x100000000ll;
+                    return true;
+                }
+                return false;
+            };
+            int64_t alo, ahi, blo, bhi;
+            if (toSigned(ra, alo, ahi) && toSigned(rb, blo, bhi)) {
+                if (ahi < blo) { *repl = Opnd::cst(1); return true; }
+                if (alo >= bhi) { *repl = Opnd::cst(0); return true; }
             }
         }
         return false;
