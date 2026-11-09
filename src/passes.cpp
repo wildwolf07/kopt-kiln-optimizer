@@ -504,6 +504,16 @@ SR transfer(const Inst &x, const std::function<SR(int)> &R) {
 
 std::vector<SR> gVRP;   // signed ranges from the last computeVRP (by value)
 
+// A value's recorded range may rely on the branch facts of the block that
+// defines it. When a pass moves the definition to another block (speculation,
+// if-conversion, LICM, store selects), those facts may not hold there any
+// more, so the recorded range is dropped and later queries recompute it from
+// the operands.
+void forgetRange(Val v) {
+    if (v >= 0 && v < static_cast<int>(gIVRange.size())) gIVRange[static_cast<size_t>(v)] = Range();
+    if (v >= 0 && v < static_cast<int>(gVRP.size())) gVRP[static_cast<size_t>(v)] = SR();
+}
+
 // Trip-count bounds for innermost loops (from a sound range solution sr).
 // Every path from the header back to it (the loop body without inner loops is
 // a DAG) changes each header phi by an exact constant, or by something we
@@ -2020,7 +2030,7 @@ bool storeSelect(Func &f) {
             std::vector<Inst> moved;
             for (size_t i = 0; i < prefix; i++) {
                 const Inst &x = f.bb[t].insts[i];
-                if (x.op != OP_STORE) { moved.push_back(x); continue; }
+                if (x.op != OP_STORE) { forgetRange(x.dst); moved.push_back(x); continue; }
                 const size_t si = static_cast<size_t>(std::find(stores.begin(), stores.end(), i) - stores.begin());
                 Inst sel;
                 sel.op = OP_SELECT; sel.dst = f.newVal(); sel.n = 3; sel.a[0] = c;
@@ -2203,6 +2213,278 @@ bool aliasForward(Func &f) {
             ds = defSites(f);
             changed = true;
         }
+    }
+    return changed;
+}
+
+// Closed forms for counted summation loops. A loop whose only exit is its
+// header test "i < n" (signed, n loop-invariant, i = phi(i0, i + 1)), whose
+// body is pure, and whose other header phis are accumulators
+//   s' = s + c0 + c1*i + c2*i*i   (c0..c2 loop-invariant)
+// is replaced by its exit values, computed before the loop:
+//   T  = (i0 < n) ? n - i0 : 0          (i + 1 never wraps: i < n <= INT_MAX)
+//   S1 = T(T-1)/2                        (halve whichever factor is even)
+//   S2 = T(T-1)(2T-1)/6 = S1*(2T-1)/3    (exact: times the inverse of 3 mod 2^32)
+//   s_exit = s0 + c0*T + c1*(T*i0 + S1) + c2*(T*i0*i0 + 2*i0*S1 + S2),  i_exit = i0 + T
+// Every identity holds modulo 2^32, so the wrapped results are the same.
+bool closedFormLoops(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        const int h = L.header;
+        if (irr[h] || h == 0 || L.latches.size() != 1) continue;
+        auto inL = [&](int b) { return b >= 0 && li.inLoop(b, static_cast<int>(l)); };
+        std::vector<int> outside;
+        for (int p : f.bb[h].preds) if (!inL(p)) outside.push_back(p);
+        if (outside.size() != 1) continue;
+        const int pre = outside[0];
+        const BB &H = f.bb[h];
+        if (H.term().op != OP_BR || H.term().a[0].isConst) continue;
+        const int tIn = H.term().tgt[0], ex = H.term().tgt[1];
+        if (!inL(tIn) || inL(ex)) continue;
+        // Only the header leaves the loop; only the header has phis; all work is pure.
+        bool ok = true;
+        for (int b : L.blocks) {
+            const BB &B = f.bb[b];
+            if (b != h && !B.phis.empty()) { ok = false; break; }
+            int out[2];
+            int ns = f.succs(b, out);
+            for (int k = 0; k < ns; k++) if (!inL(out[k]) && b != h) ok = false;
+            for (size_t i = 0; i + 1 < B.insts.size(); i++)
+                if (!isPure(B.insts[i].op) || B.insts[i].dst < 0) ok = false;
+            const Op t = B.term().op;
+            if (t != OP_BR && t != OP_JMP) ok = false;
+        }
+        if (!ok) continue;
+        auto invariant = [&](Opnd o) {
+            return o.isConst || (o.v < static_cast<int>(ds.size()) && (ds[o.v].block < 0 || !inL(ds[o.v].block)));
+        };
+        // Header test: lt(i, n), true stays in the loop.
+        const Inst *cond = defInst(f, ds, f.resolve(H.term().a[0]));
+        if (!cond || cond->op != OP_LT || !inL(ds[f.resolve(H.term().a[0]).v].block)) continue;
+        const Opnd iv = f.resolve(cond->a[0]), n = f.resolve(cond->a[1]);
+        if (iv.isConst || !invariant(n)) continue;
+        const Phi *ip = nullptr;
+        for (const Phi &ph : H.phis) if (ph.dst == iv.v) ip = &ph;
+        if (!ip || ip->in.size() != 2) continue;
+        Opnd i0, inext;
+        for (auto &in : ip->in) { if (in.first == pre) i0 = f.resolve(in.second); else inext = f.resolve(in.second); }
+        {
+            const Inst *st = inext.isConst ? nullptr : defInst(f, ds, inext);
+            if (!st || st->op != OP_ADD || !inL(ds[inext.v].block)) continue;
+            Opnd a = f.resolve(st->a[0]), b = f.resolve(st->a[1]);
+            if (!((a == iv && b.isC(1)) || (b == iv && a.isC(1)))) continue;
+        }
+        // Values made in the loop may only be used in the loop (header phis excepted).
+        std::vector<char> inLoopVal(f.nvals, 0);
+        for (int b : L.blocks) for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inLoopVal[x.dst] = 1;
+        for (int b = 0; b < static_cast<int>(f.bb.size()) && ok; b++) {
+            if (!f.bb[b].alive || inL(b)) continue;
+            for (const Phi &ph : f.bb[b].phis)
+                for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst && inLoopVal[o.v]) ok = false; }
+            for (const Inst &x : f.bb[b].insts)
+                for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst && inLoopVal[o.v]) ok = false; }
+        }
+        if (!ok) continue;
+        {   // pre must not already reach ex directly (phi entries would clash)
+            int out[2];
+            int ns = f.succs(pre, out);
+            for (int k = 0; k < ns; k++) if (out[k] == ex) ok = false;
+        }
+        if (!ok) continue;
+        // Polynomial evaluation: value = sc*s + c[0] + c[1]*i + c[2]*i^2.
+        std::vector<Inst> emit;
+        auto bin = [&](Op op, Opnd a, Opnd b) -> Opnd {
+            uint32_t r;
+            if (a.isConst && b.isConst && foldConstant(op, a.c, b.c, 0, 0, r)) return Opnd::cst(r);
+            if (op == OP_ADD && a.isC(0)) return b;
+            if ((op == OP_ADD || op == OP_SUB) && b.isC(0)) return a;
+            if (op == OP_MUL && (a.isC(0) || b.isC(0))) return Opnd::cst(0);
+            if (op == OP_MUL && a.isC(1)) return b;
+            if (op == OP_MUL && b.isC(1)) return a;
+            Inst t; t.op = op; t.dst = f.newVal(); t.n = 2; t.a[0] = a; t.a[1] = b;
+            emit.push_back(t);
+            return Opnd::val(t.dst);
+        };
+        struct P { Opnd c[3]; uint32_t sc = 0; Val s = -1; bool ok = true; };
+        auto zeroP = [&]() { P p; for (auto &c : p.c) c = Opnd::cst(0); return p; };
+        std::unordered_map<int, P> memo;
+        std::function<P(Opnd, int)> eval = [&](Opnd o, int depth) -> P {
+            P r = zeroP();
+            o = f.resolve(o);
+            if (depth > 40) { r.ok = false; return r; }
+            if (o.isConst || invariant(o)) { r.c[0] = o; return r; }
+            if (o == iv) { r.c[1] = Opnd::cst(1); return r; }
+            auto it = memo.find(o.v);
+            if (it != memo.end()) return it->second;
+            const DefSite &dsv = ds[o.v];
+            if (dsv.isPhi) {
+                if (dsv.block == h) { r.sc = 1; r.s = o.v; } else r.ok = false;
+                memo[o.v] = r;
+                return r;
+            }
+            const Inst *x = defInst(f, ds, o);
+            if (!x) { r.ok = false; return r; }
+            P a, b;
+            switch (x->op) {
+            case OP_MOV: r = eval(x->a[0], depth + 1); break;
+            case OP_ADD: case OP_SUB: {
+                a = eval(x->a[0], depth + 1); b = eval(x->a[1], depth + 1);
+                if (!a.ok || !b.ok || (a.sc && b.sc) || (a.sc && b.s >= 0) ) { r.ok = false; break; }
+                const Op op = x->op;
+                for (int k = 0; k < 3; k++) r.c[k] = bin(op, a.c[k], b.c[k]);
+                if (op == OP_SUB && b.sc) { r.ok = false; break; }
+                r.sc = a.sc + b.sc; r.s = a.sc ? a.s : b.s;
+                break;
+            }
+            case OP_SHL: case OP_MUL: {
+                a = eval(x->a[0], depth + 1);
+                Opnd bo = f.resolve(x->a[1]);
+                if (x->op == OP_SHL) {
+                    if (!bo.isConst) { r.ok = false; break; }
+                    b = zeroP(); b.c[0] = Opnd::cst(1u << (bo.c & 31));
+                } else {
+                    b = eval(bo, depth + 1);
+                }
+                if (!a.ok || !b.ok || a.sc || b.sc) { r.ok = false; break; }
+                // degree check
+                auto deg = [](const P &p) { int dg = 0; for (int k = 0; k < 3; k++) if (!p.c[k].isC(0)) dg = k; return dg; };
+                if (deg(a) + deg(b) > 2) { r.ok = false; break; }
+                for (int k = 0; k < 3; k++) {
+                    Opnd acc = Opnd::cst(0);
+                    for (int u = 0; u <= k; u++) acc = bin(OP_ADD, acc, bin(OP_MUL, a.c[u], b.c[k - u]));
+                    r.c[k] = acc;
+                }
+                break;
+            }
+            case OP_MAC: {
+                // a*b + c
+                a = eval(x->a[0], depth + 1); b = eval(x->a[1], depth + 1);
+                P c = eval(x->a[2], depth + 1);
+                if (!a.ok || !b.ok || !c.ok || a.sc || b.sc) { r.ok = false; break; }
+                auto deg = [](const P &p) { int dg = 0; for (int k = 0; k < 3; k++) if (!p.c[k].isC(0)) dg = k; return dg; };
+                if (deg(a) + deg(b) > 2) { r.ok = false; break; }
+                for (int k = 0; k < 3; k++) {
+                    Opnd acc = c.c[k];
+                    for (int u = 0; u <= k; u++) acc = bin(OP_ADD, acc, bin(OP_MUL, a.c[u], b.c[k - u]));
+                    r.c[k] = acc;
+                }
+                r.sc = c.sc; r.s = c.s;
+                break;
+            }
+            case OP_ADDSH: {
+                // a + (b << k)
+                a = eval(x->a[0], depth + 1); b = eval(x->a[1], depth + 1);
+                if (!a.ok || !b.ok || b.sc) { r.ok = false; break; }
+                const Opnd sh = Opnd::cst(1u << (x->k & 31));
+                for (int k = 0; k < 3; k++) r.c[k] = bin(OP_ADD, a.c[k], bin(OP_MUL, b.c[k], sh));
+                r.sc = a.sc; r.s = a.s;
+                break;
+            }
+            default: r.ok = false;
+            }
+            memo[o.v] = r;
+            return r;
+        };
+        // Accumulators.
+        struct Acc { Val phi; Opnd s0; P step; };
+        std::vector<Acc> accs;
+        for (const Phi &ph : H.phis) {
+            if (ph.dst == iv.v) continue;
+            if (ph.in.size() != 2) { ok = false; break; }
+            Opnd s0, nx;
+            for (auto &in : ph.in) { if (in.first == pre) s0 = f.resolve(in.second); else nx = f.resolve(in.second); }
+            P p = eval(nx, 0);
+            if (!p.ok || p.sc != 1 || p.s != ph.dst) { ok = false; break; }
+            accs.push_back({ph.dst, s0, p});
+        }
+        if (!ok) continue;
+        // Exit values.
+        const Opnd guard = bin(OP_LT, i0, n);
+        Opnd T;
+        {
+            Opnd diff = bin(OP_SUB, n, i0);
+            if (guard.isConst) T = guard.c ? diff : Opnd::cst(0);
+            else {
+                Inst sl; sl.op = OP_SELECT; sl.dst = f.newVal(); sl.n = 3; sl.a[0] = guard; sl.a[1] = diff; sl.a[2] = Opnd::cst(0);
+                emit.push_back(sl); T = Opnd::val(sl.dst);
+            }
+        }
+        bool needS1 = false, needS2 = false;
+        for (const Acc &a : accs) { if (!a.step.c[1].isC(0) || !a.step.c[2].isC(0)) needS1 = true; if (!a.step.c[2].isC(0)) needS2 = true; }
+        Opnd S1 = Opnd::cst(0), S2 = Opnd::cst(0);
+        if (needS1) {
+            const Opnd tm1 = bin(OP_ADD, T, Opnd::cst(0xFFFFFFFFu));
+            const Opnd evenT = bin(OP_MUL, bin(OP_SHR, T, Opnd::cst(1)), tm1);
+            const Opnd oddT = bin(OP_MUL, T, bin(OP_SHR, tm1, Opnd::cst(1)));
+            const Opnd odd = bin(OP_AND, T, Opnd::cst(1));
+            if (odd.isConst) S1 = odd.c ? oddT : evenT;
+            else {
+                Inst sl; sl.op = OP_SELECT; sl.dst = f.newVal(); sl.n = 3; sl.a[0] = odd; sl.a[1] = oddT; sl.a[2] = evenT;
+                emit.push_back(sl); S1 = Opnd::val(sl.dst);
+            }
+        }
+        if (needS2) {
+            const Opnd twoTm1 = bin(OP_ADD, bin(OP_SHL, T, Opnd::cst(1)), Opnd::cst(0xFFFFFFFFu));
+            S2 = bin(OP_MUL, bin(OP_MUL, S1, twoTm1), Opnd::cst(0xAAAAAAABu));   // inverse of 3 mod 2^32
+        }
+        std::vector<std::pair<Val, Opnd>> finals;
+        finals.push_back({iv.v, bin(OP_ADD, i0, T)});
+        for (const Acc &a : accs) {
+            Opnd tot = bin(OP_MUL, a.step.c[0], T);
+            if (!a.step.c[1].isC(0)) tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[1], bin(OP_ADD, bin(OP_MUL, T, i0), S1)));
+            if (!a.step.c[2].isC(0)) {
+                Opnd q = bin(OP_ADD, bin(OP_MUL, bin(OP_MUL, T, i0), i0), bin(OP_ADD, bin(OP_MUL, bin(OP_SHL, i0, Opnd::cst(1)), S1), S2));
+                tot = bin(OP_ADD, tot, bin(OP_MUL, a.step.c[2], q));
+            }
+            finals.push_back({a.phi, bin(OP_ADD, a.s0, tot)});
+        }
+        // Rewire: pre goes straight to the exit; the loop becomes unreachable.
+        auto &pi = f.bb[pre].insts;
+        pi.insert(pi.end() - 1, emit.begin(), emit.end());
+        Inst &pt = f.bb[pre].term();
+        int nt = pt.op == OP_JMP ? 1 : (pt.op == OP_BR ? 2 : 0);
+        for (int k = 0; k < nt; k++) if (pt.tgt[k] == h) pt.tgt[k] = ex;
+        for (Phi &ph : f.bb[ex].phis)
+            for (auto &in : ph.in) if (in.first == h) in.first = pre;
+        for (auto &fv : finals) f.replaceAll(fv.first, fv.second);
+        f.rebuildPreds();
+        return true;   // one loop per call; analyses are stale now
+    }
+    return false;
+}
+
+// Stores to a constant scratch word (3072..4095) that no load can read are
+// dead: the scratch region is not part of the observable behaviour
+// (KIR_SPEC.md section 7), and a constant in-range address cannot trap.
+bool deadScratchStores(Func &f) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    std::vector<Opnd> loads;
+    for (const BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (const Inst &x : B.insts)
+            if (x.op == OP_LOAD || x.op == OP_VLOAD) loads.push_back(f.resolve(x.a[0]));
+    }
+    bool changed = false;
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        std::vector<Inst> out;
+        out.reserve(B.insts.size());
+        for (const Inst &x : B.insts) {
+            if (x.op == OP_STORE && x.a[0].isConst && x.a[0].c >= kScratchBase && x.a[0].c < kMemWords) {
+                bool read = false;
+                for (Opnd la : loads) if (!mustDiffer(f, ds, la, x.a[0])) { read = true; break; }
+                if (!read) { changed = true; continue; }
+            }
+            out.push_back(x);
+        }
+        B.insts.swap(out);
     }
     return changed;
 }
@@ -2415,6 +2697,7 @@ bool licm(Func &f) {
                     BB &P = f.bb[pre];
                     P.insts.insert(P.insts.end() - 1, x);
                     f.bb[b].insts.erase(f.bb[b].insts.begin() + i);
+                    forgetRange(x.dst);
                     defBlock[x.dst] = pre;
                     ds[x.dst] = DefSite{pre, static_cast<int>(P.insts.size()) - 2, false};
                     any = true;
@@ -2493,6 +2776,7 @@ bool speculate(Func &f, int budgetPerEdge, bool maskLoads) {
             }
             P.insts.insert(P.insts.end() - 1, x);
             f.bb[s].insts.erase(f.bb[s].insts.begin() + i);
+            forgetRange(x.dst);
             definedHere[x.dst] = 0;
             ds[x.dst] = DefSite{p, static_cast<int>(P.insts.size()) - 2, false};
             moved++;
@@ -3146,7 +3430,7 @@ bool ifConvert(Func &f, const Machine &m) {
         Inst br = A.term();
         A.insts.pop_back();
         for (int s : arms)
-            for (size_t i = 0; i + 1 < f.bb[s].insts.size(); i++) A.insts.push_back(f.bb[s].insts[i]);
+            for (size_t i = 0; i + 1 < f.bb[s].insts.size(); i++) { forgetRange(f.bb[s].insts[i].dst); A.insts.push_back(f.bb[s].insts[i]); }
         const int fromTrue = (arms.size() == 2 || arms[0] == t) ? t : a;
         const int fromFalse = (arms.size() == 2 || arms[0] == e) ? e : a;
         for (Phi &ph : f.bb[join].phis) {

@@ -1,0 +1,36 @@
+; a speculated load whose address range was only valid in a dead block
+func f(v0, v1)
+b0:
+  const v5, 3
+  load v2, v3
+  select v1, v4, 8, v0
+  shl v4, v0, 100
+  mac v3, v3, v2, 16
+  eq v4, 2, v4
+  eq v2, v3, v2
+  br v0, b3, b0
+b1:
+  store v1, v1
+  mul v2, v4, v2
+  eq v0, v2, 65535
+  vload v3, 0
+  sub v5, v5, 1
+  br v5, b1, b3
+b2:
+  add v0, v2, v2
+  mov v4, v3
+  shr v1, 33, v4
+  vload v2, 1
+  vload v3, 0
+  select v0, v0, v4, v0
+  add v0, v0, 1
+  lt v1, v0, v4
+  br v1, b2, b3
+b3:
+  and v3, v1, 15
+  load v1, v3
+  const v4, 64
+  add v2, v3, v4
+  shl v3, v4, v1
+  sub v2, v0, v0
+  ret v1
