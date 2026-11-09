@@ -1,0 +1,27 @@
+; checksum loops whose sums stay below twice the modulus (one conditional subtract)
+func mod_conditional_subtract(v0)
+entry:
+  and v1, v0, 63
+  const v2, 1
+  const v3, 0
+  const v4, 0
+  jmp head
+head:
+  lt v5, v4, v1
+  br v5, body, done
+body:
+  load v6, v4
+  and v7, v6, 255
+  add v8, v2, v7
+  mod v2, v8, 255
+  add v9, v3, v2
+  mod v3, v9, 255
+  div v10, v9, 255
+  add v3, v3, v10
+  mod v3, v3, 255
+  add v4, v4, 1
+  jmp head
+done:
+  shl v11, v3, 8
+  or v12, v11, v2
+  ret v12

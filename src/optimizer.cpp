@@ -147,6 +147,10 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             licm(f);
             dce(f);
         }
+        if (fl.reassoc && passEnabled("divconst") && TIMED("divconst", divByConstant(f, m))) {
+            instSimplify(f);
+            dce(f);
+        }
         if (fl.reassoc && fl.storeSel && passEnabled("balance") && TIMED("balance", balanceSums(f))) {
             instSimplify(f);
             dce(f);
@@ -708,7 +712,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // code that GVN and the scheduler can work on. Each step is a candidate; the
     // simulator (with the icache cost) decides.
     if (effort == 2 && passEnabled("flatten")) {
-        const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
+        const std::vector<const Cand *> best = bestDistinct(cands, 3);
         std::vector<std::pair<Program, std::pair<std::string, Flags>>> seeds;
         for (size_t i = 0; i < best.size(); i++)
             seeds.push_back({best[i]->p, {best[i]->what, best[i]->flags}});

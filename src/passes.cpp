@@ -2234,6 +2234,26 @@ bool closedFormLoops(Func &f) {
     DomInfo d = computeDominators(f);
     LoopInfo li = computeLoops(f, d);
     std::vector<bool> irr = irreducibleBlocks(f, d);
+    // users[v]: blocks that read value v (built once per call).
+    std::vector<std::vector<int>> users;
+    auto buildUsers = [&]() {
+        users.assign(f.nvals, {});
+        for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+            if (!f.bb[b].alive) continue;
+            for (const Phi &ph : f.bb[b].phis)
+                for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst) users[o.v].push_back(b); }
+            for (const Inst &x : f.bb[b].insts)
+                for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst) users[o.v].push_back(b); }
+        }
+    };
+    auto usedOnlyInLoop = [&](const LoopInfo::Loop &L, const std::function<bool(int)> &inL) {
+        if (users.empty()) buildUsers();
+        for (int b : L.blocks)
+            for (const Inst &x : f.bb[b].insts)
+                if (x.dst >= 0 && x.dst < static_cast<int>(users.size()))
+                    for (int u : users[x.dst]) if (!inL(u)) return false;
+        return true;
+    };
     for (size_t l = 0; l < li.loops.size(); l++) {
         const LoopInfo::Loop &L = li.loops[l];
         const int h = L.header;
@@ -2328,15 +2348,7 @@ bool closedFormLoops(Func &f) {
             if (!pow2 && ihi - mplo + static_cast<int64_t>(kabs) - 1 >= 2147483648ll) continue;
         }
         // Values made in the loop may only be used in the loop (header phis excepted).
-        std::vector<char> inLoopVal(f.nvals, 0);
-        for (int b : L.blocks) for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inLoopVal[x.dst] = 1;
-        for (int b = 0; b < static_cast<int>(f.bb.size()) && ok; b++) {
-            if (!f.bb[b].alive || inL(b)) continue;
-            for (const Phi &ph : f.bb[b].phis)
-                for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst && inLoopVal[o.v]) ok = false; }
-            for (const Inst &x : f.bb[b].insts)
-                for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst && inLoopVal[o.v]) ok = false; }
-        }
+        // (outside uses are checked after the pattern matches)
         if (!ok) continue;
         {   // pre must not already reach ex directly (phi entries would clash)
             int out[2];
@@ -2451,6 +2463,8 @@ bool closedFormLoops(Func &f) {
             accs.push_back({ph.dst, s0, p});
         }
         if (!ok) continue;
+        // Values made in the loop may only be used in the loop (header phis excepted).
+        if (!usedOnlyInLoop(L, inL)) continue;
         // Exit values.
         // Up: rounds = ceil((n' - i0) / k) when i0 < n'.  Down: ceil((i0 - m') / k) when m' < i0.
         const Opnd nEff = down ? (inclusive ? bin(OP_ADD, n, Opnd::cst(0xFFFFFFFFu)) : n)
@@ -2576,6 +2590,26 @@ bool popcountLoops(Func &f) {
     DomInfo d = computeDominators(f);
     LoopInfo li = computeLoops(f, d);
     std::vector<bool> irr = irreducibleBlocks(f, d);
+    // users[v]: blocks that read value v (built once per call).
+    std::vector<std::vector<int>> users;
+    auto buildUsers = [&]() {
+        users.assign(f.nvals, {});
+        for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+            if (!f.bb[b].alive) continue;
+            for (const Phi &ph : f.bb[b].phis)
+                for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst) users[o.v].push_back(b); }
+            for (const Inst &x : f.bb[b].insts)
+                for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst) users[o.v].push_back(b); }
+        }
+    };
+    auto usedOnlyInLoop = [&](const LoopInfo::Loop &L, const std::function<bool(int)> &inL) {
+        if (users.empty()) buildUsers();
+        for (int b : L.blocks)
+            for (const Inst &x : f.bb[b].insts)
+                if (x.dst >= 0 && x.dst < static_cast<int>(users.size()))
+                    for (int u : users[x.dst]) if (!inL(u)) return false;
+        return true;
+    };
     for (size_t l = 0; l < li.loops.size(); l++) {
         const LoopInfo::Loop &L = li.loops[l];
         const int h = L.header;
@@ -2600,15 +2634,7 @@ bool popcountLoops(Func &f) {
                 if (!isPure(B.insts[i].op) || B.insts[i].dst < 0) ok = false;
         }
         if (!ok) continue;
-        std::vector<char> inLoopVal(f.nvals, 0);
-        for (int b : L.blocks) for (const Inst &x : f.bb[b].insts) if (x.dst >= 0) inLoopVal[x.dst] = 1;
-        for (int b = 0; b < static_cast<int>(f.bb.size()) && ok; b++) {
-            if (!f.bb[b].alive || inL(b)) continue;
-            for (const Phi &ph : f.bb[b].phis)
-                for (auto &in : ph.in) { Opnd o = f.resolve(in.second); if (!o.isConst && inLoopVal[o.v]) ok = false; }
-            for (const Inst &x : f.bb[b].insts)
-                for (int a = 0; a < x.n; a++) { Opnd o = f.resolve(x.a[a]); if (!o.isConst && inLoopVal[o.v]) ok = false; }
-        }
+        // (outside uses are checked after the pattern matches)
         {
             int out[2];
             int ns = f.succs(pre, out);
@@ -2702,6 +2728,8 @@ bool popcountLoops(Func &f) {
         }
         if (!ok || accs.empty()) continue;
         if (form == 3) X = Xc;
+        // Values made in the loop may only be used in the loop (header phis excepted).
+        if (!usedOnlyInLoop(L, inL)) continue;
         std::vector<Inst> emit;
         auto bin = [&](Op op, Opnd a, Opnd b) -> Opnd {
             uint32_t r;
@@ -2729,6 +2757,86 @@ bool popcountLoops(Func &f) {
         return true;
     }
     return false;
+}
+
+// Division and remainder by a constant C (not a power of two) of a value
+// proven to lie in [0, X] (X < 2^31): q = (x * M) >> s with M = ceil(2^s / C),
+// for the smallest s where X*M < 2^32 and X*(M*C - 2^s) < 2^s. Then
+// floor(x*M / 2^s) = floor(x / C) for every x in [0, X] (Granlund-Montgomery);
+// the product never wraps. x % C becomes x - q*C. Used only when the machine's
+// latencies make it faster than its div. When x < 2C a single conditional
+// subtraction does it: x / C = (x >= C), x % C = (x < C) ? x : x - C.
+bool divByConstant(Func &f, const Machine &m) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        if (!f.bb[b].alive) continue;
+        for (size_t i = 0; i < f.bb[b].insts.size(); i++) {
+            const Inst x = f.bb[b].insts[i];
+            if ((x.op != OP_DIV && x.op != OP_MOD) || x.dst < 0) continue;
+            const Opnd A = f.resolve(x.a[0]), B = f.resolve(x.a[1]);
+            if (A.isConst || !B.isConst) continue;
+            const uint32_t C = B.c;
+            if (C < 3 || C >= 0x80000000u || (C & (C - 1)) == 0) continue;
+            const Range r = rangeAt(f, ds, A, b);
+            if (r.hi >= 0x80000000ull) continue;
+            const uint64_t X = r.hi;
+            if (X < 2ull * C) {
+                // One conditional subtraction: x < 2C gives q in {0, 1}.
+                Inst lt; lt.op = OP_LT; lt.dst = f.newVal(); lt.n = 2; lt.a[0] = A; lt.a[1] = Opnd::cst(C);
+                Inst &y = f.bb[b].insts[i];
+                std::vector<Inst> pre{lt};
+                if (x.op == OP_DIV) {
+                    y.op = OP_EQ; y.n = 2; y.a[0] = Opnd::val(lt.dst); y.a[1] = Opnd::cst(0);   // x >= C
+                } else {
+                    Inst sb; sb.op = OP_ADD; sb.dst = f.newVal(); sb.n = 2; sb.a[0] = A; sb.a[1] = Opnd::cst(0u - C);
+                    pre.push_back(sb);
+                    y.op = OP_SELECT; y.n = 3; y.a[0] = Opnd::val(lt.dst); y.a[1] = A; y.a[2] = Opnd::val(sb.dst);
+                }
+                auto &ins = f.bb[b].insts;
+                ins.insert(ins.begin() + static_cast<long>(i), pre.begin(), pre.end());
+                i += pre.size();
+                ds = defSites(f);
+                changed = true;
+                continue;
+            }
+            uint64_t M = 0;
+            int sh = -1;
+            for (int sTry = 0; sTry <= 32; sTry++) {
+                const uint64_t p2 = 1ull << sTry;
+                const uint64_t Mc = (p2 + C - 1) / C;
+                const uint64_t e = Mc * C - p2;
+                if (X * Mc >= (1ull << 32)) break;   // larger s only grows M
+                if (X * e < p2) { M = Mc; sh = sTry; break; }
+            }
+            if (sh < 0) continue;
+            const int mulCost = m.latency(OP_MUL) + m.latency(OP_SHR);
+            const int need = x.op == OP_DIV ? mulCost : mulCost + m.latency(OP_MUL) + m.latency(OP_SUB);
+            if (need >= m.latency(x.op)) continue;
+            std::vector<Inst> pre;
+            auto mk = [&](Op op, Opnd a, Opnd c) {
+                Inst t; t.op = op; t.dst = f.newVal(); t.n = 2; t.a[0] = a; t.a[1] = c;
+                pre.push_back(t);
+                return Opnd::val(t.dst);
+            };
+            Opnd q = mk(OP_MUL, A, Opnd::cst(static_cast<uint32_t>(M)));
+            if (sh > 0) q = mk(OP_SHR, q, Opnd::cst(static_cast<uint32_t>(sh)));
+            Inst &y = f.bb[b].insts[i];
+            if (x.op == OP_DIV) {
+                y.op = OP_MOV; y.n = 1; y.a[0] = q;
+            } else {
+                const Opnd qc = mk(OP_MUL, q, Opnd::cst(C));
+                y.op = OP_SUB; y.n = 2; y.a[0] = A; y.a[1] = qc;
+            }
+            auto &ins = f.bb[b].insts;
+            ins.insert(ins.begin() + static_cast<long>(i), pre.begin(), pre.end());
+            i += pre.size();
+            ds = defSites(f);
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 bool dce(Func &f) {

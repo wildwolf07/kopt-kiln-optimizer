@@ -1,0 +1,22 @@
+; bounded division and remainder by constants (digit loop, checksum mod, odd divisors)
+func div_by_constant(v0, v1)
+entry:
+  and v2, v0, 65535
+  const v3, 0
+  jmp head
+head:
+  br v2, body, done
+body:
+  mod v4, v2, 10
+  add v3, v3, v4
+  div v2, v2, 10
+  jmp head
+done:
+  and v5, v1, 1048575
+  mod v6, v5, 65521
+  div v7, v5, 641
+  mod v8, v5, 7
+  add v9, v6, v7
+  add v9, v9, v8
+  vstore 0, v3
+  ret v9
