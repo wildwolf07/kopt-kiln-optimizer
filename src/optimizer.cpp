@@ -142,6 +142,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         }
         TIMED("fuseOps", fuseOps(f, m, fl.fuseReductions));
         TIMED("ifConvert", ifConvert(f, m));
+        if (fl.reassoc) TIMED("selectToAdd", selectToAdd(f));
         TIMED("instSimplify", instSimplify(f));
         // If-conversion and select folding can leave sums that now merge.
         if (TIMED("combineLinear", combineLinear(f))) {

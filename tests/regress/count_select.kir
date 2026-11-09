@@ -1,0 +1,38 @@
+; conditional increments on both select sides, boolean and non-boolean conditions
+func count_select(v0, v1)
+entry:
+  and v2, v0, 127
+  const v3, 0
+  const v4, 0
+  const v5, 1
+  jmp head
+head:
+  lt v6, v2, v5
+  br v6, done, body
+body:
+  mod v7, v1, v5
+  br v7, skip, inc
+inc:
+  add v3, v3, 1
+  jmp next
+skip:
+  jmp next
+next:
+  xor v8, v7, v0
+  br v8, inc2, next2
+inc2:
+  add v4, v4, 1
+  jmp next2
+next2:
+  lt v9, v7, 3
+  br v9, inc3, last
+inc3:
+  add v3, v3, 1
+  jmp last
+last:
+  add v5, v5, 1
+  jmp head
+done:
+  vstore 0, v4
+  sub v10, v3, v4
+  ret v10

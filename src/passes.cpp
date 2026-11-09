@@ -2463,6 +2463,55 @@ bool hornerSplit(Func &f, int registers) {
     return changed;
 }
 
+// Counting selects: select(c, a, a+1) == a + (c == 0) and
+// select(c, a+1, a) == a + (c != 0). The test moves off the path through a,
+// so a chain of conditional increments costs one add per step instead of an
+// add and a select. (c != 0 is c itself when c is 0 or 1, else eq(eq(c,0),0).)
+bool selectToAdd(Func &f) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        if (!f.bb[b].alive) continue;
+        for (size_t i = 0; i < f.bb[b].insts.size(); i++) {
+            const Inst x = f.bb[b].insts[i];
+            if (x.op != OP_SELECT || x.dst < 0 || x.a[0].isConst) continue;
+            const Opnd c = x.a[0];
+            int incSide = -1;   // 1: true side is a+1; 2: false side is a+1
+            Opnd base;
+            for (int side = 1; side <= 2 && incSide < 0; side++) {
+                const Opnd inc = x.a[side], other = x.a[3 - side];
+                const Inst *d = defInst(f, ds, inc);
+                if (d && d->op == OP_ADD && d->a[1].isC(1) && d->a[0] == other) { incSide = side; base = other; }
+            }
+            if (incSide < 0) continue;
+            std::vector<Inst> pre;
+            auto mk = [&](Op op, Opnd p, Opnd q) {
+                Inst t;
+                t.op = op; t.dst = f.newVal(); t.n = 2; t.a[0] = p; t.a[1] = q;
+                pre.push_back(t);
+                return Opnd::val(t.dst);
+            };
+            Opnd bit;
+            if (incSide == 2) {
+                bit = mk(OP_EQ, c, Opnd::cst(0));
+            } else if (rangeOf(f, ds, c, 6).hi <= 1) {
+                bit = c;
+            } else {
+                bit = mk(OP_EQ, mk(OP_EQ, c, Opnd::cst(0)), Opnd::cst(0));
+            }
+            Inst &y = f.bb[b].insts[i];
+            y.op = OP_ADD; y.n = 2; y.a[0] = base; y.a[1] = bit;
+            auto &ins = f.bb[b].insts;
+            ins.insert(ins.begin() + static_cast<long>(i), pre.begin(), pre.end());
+            i += pre.size();
+            changed = true;
+        }
+        if (changed) ds = defSites(f);
+    }
+    return changed;
+}
+
 // ---------------------------------------------------------------------------
 // Machine-specific fusion and strength reduction
 // ---------------------------------------------------------------------------
