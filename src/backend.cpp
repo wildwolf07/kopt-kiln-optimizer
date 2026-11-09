@@ -315,9 +315,9 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce) {
 bool allocateK(Func &f, int K, Allocation &A) {
     std::vector<int> slotOf;          // per value: scratch slot index or -1
     std::vector<char> noSpill;        // short temps created by spilling
+    std::vector<int> web;             // spill web: copy-related values that may share a slot
     int nextSlot = 0;
     const int maxSlots = 1024;
-    for (Val p : f.params) (void)p;
     for (int iter = 0; iter < 40; iter++) {
         const int nv = f.nvals;
         slotOf.resize(nv, -1);
@@ -362,6 +362,55 @@ bool allocateK(Func &f, int K, Allocation &A) {
             for (int l : liveList) isLive[l] = 0;
         }
         g.finish();
+        if (iter == 0) {
+            // Spill webs: copy-related values that never interfere may live in one
+            // scratch word, so a copy between two spilled values disappears.
+            web.assign(nv, 0);
+            for (int i = 0; i < nv; i++) web[i] = i;
+            auto wfind = [&](int x) {
+                while (web[x] != x) { web[x] = web[web[x]]; x = web[x]; }
+                return x;
+            };
+            std::vector<std::vector<int>> members(nv);
+            for (int i = 0; i < nv; i++) members[i].push_back(i);
+            std::vector<std::unordered_set<int>> wn(nv);
+            for (int v = 0; v < nv; v++) if (used[v]) wn[v].insert(g.adj[v].begin(), g.adj[v].end());
+            std::vector<Move> ms = moves;
+            std::stable_sort(ms.begin(), ms.end(), [](const Move &a, const Move &b) { return a.w > b.w; });
+            for (const Move &mv : ms) {
+                int a = wfind(mv.a), b = wfind(mv.b);
+                if (a == b || wn[a].count(b)) continue;
+                bool clash = false;   // any member of b interferes with a member of a
+                for (int x : members[b]) { if (wn[a].count(x)) { clash = true; break; } }
+                if (clash) continue;
+                web[b] = a;
+                for (int x : members[b]) members[a].push_back(x);
+                members[b].clear();
+                for (int n : wn[b]) wn[a].insert(n);
+            }
+            for (int i = 0; i < nv; i++) web[i] = wfind(i);
+            // Values whose whole life is a few instructions inside one block gain
+            // nothing from spilling (the reload would be just as long).
+            for (BB &B : f.bb) {
+                if (!B.alive) continue;
+                std::unordered_map<int, int> defAt;
+                for (int i = 0; i < static_cast<int>(B.insts.size()); i++)
+                    if (B.insts[i].dst >= 0) defAt[B.insts[i].dst] = i;
+                for (auto &kv : defAt) {
+                    int v = kv.first;
+                    bool liveOut = false;
+                    for (int u : L.liveOut[&B - &f.bb[0]]) if (u == v) { liveOut = true; break; }
+                    if (liveOut) continue;
+                    int last = kv.second;
+                    for (int i = kv.second + 1; i < static_cast<int>(B.insts.size()); i++)
+                        for (int a = 0; a < B.insts[i].n; a++)
+                            if (!B.insts[i].a[a].isConst && B.insts[i].a[a].v == v) last = i;
+                    if (last - kv.second <= 2 && wfind(v) == v && members[v].size() <= 1) noSpill[v] = 1;
+                }
+            }
+        }
+        web.resize(nv, -1);
+        for (int i = 0; i < nv; i++) if (web[i] < 0) web[i] = i;
         // Conservative (Briggs) coalescing: merge only if the merged node has
         // fewer than K neighbours of significant degree.
         std::vector<int> parent(nv);
@@ -430,15 +479,27 @@ bool allocateK(Func &f, int K, Allocation &A) {
                 if (used[v]) { A.color[v] = repColor[find(v)]; A.ncolors = std::max(A.ncolors, A.color[v] + 1); }
             return true;
         }
-        // Spill every member of each spilled class to one slot.
-        std::vector<int> classSlot(nv, -1);
+        // Spill every member of each spilled class, and of its spill web, to
+        // one slot per web.
+        std::vector<int> webSlot(nv, -1);
+        std::vector<char> spillRep(nv, 0);
         for (int r : spilled) {
             if (noSpill[r]) return false;           // cannot make progress
-            if (nextSlot >= maxSlots) return false;
-            classSlot[r] = nextSlot++;
+            spillRep[r] = 1;
         }
-        for (int v = 0; v < nv; v++)
-            if (used[v] && classSlot[find(v)] >= 0) slotOf[v] = classSlot[find(v)];
+        for (int v = 0; v < nv; v++) {
+            if (!used[v] || !spillRep[find(v)]) continue;
+            int w = web[v];
+            if (webSlot[w] < 0) {
+                if (nextSlot >= maxSlots) return false;
+                webSlot[w] = nextSlot++;
+            }
+        }
+        for (int v = 0; v < nv; v++) {
+            if (!used[v] || noSpill[v]) continue;
+            int w = web[v];
+            if (webSlot[w] >= 0) slotOf[v] = webSlot[w];
+        }
         auto slotAddr = [&](int s) { return Opnd::cst(static_cast<uint32_t>(4095 - s)); };
         for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
             BB &B = f.bb[b];
@@ -453,6 +514,10 @@ bool allocateK(Func &f, int K, Allocation &A) {
                         out.push_back(st);
                     }
             for (Inst x : B.insts) {
+                // A copy between two values in the same scratch word does nothing.
+                if (x.op == OP_MOV && x.dst >= 0 && slotOf[x.dst] >= 0 && !x.a[0].isConst &&
+                    slotOf[x.a[0].v] == slotOf[x.dst])
+                    continue;
                 std::vector<std::pair<int, int>> loaded;
                 for (int a = 0; a < x.n; a++) {
                     if (x.a[a].isConst || slotOf[x.a[a].v] < 0) continue;
