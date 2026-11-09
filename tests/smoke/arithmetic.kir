@@ -1,0 +1,7 @@
+func arithmetic(v0)
+entry:
+  add v1, v0, 1
+  shl v2, v1, 33
+  shr v3, -1, -1
+  add v4, v2, v3
+  ret v4

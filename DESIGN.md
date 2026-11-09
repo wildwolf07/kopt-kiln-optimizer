@@ -51,7 +51,7 @@ Sources: Cytron et al. (SSA construction), Cooper, Harvey and Kennedy ("A Simple
 
 **Driver**
 - Builds many candidate programs and ranks them by exact simulated cycles on typical inputs.
-- Verifies the winner on about 120 inputs before writing it.
+- Checks candidates on fixed-seed inputs before writing the winner; this is a testing safeguard, not a proof over all inputs.
 
 **Missing or partial**
 - No loop unrolling without exit checks (counted-loop unrolling).
@@ -92,11 +92,11 @@ Sources: Cytron et al. (SSA construction), Cooper, Harvey and Kennedy ("A Simple
    5. Layout.
    6. Scheduling.
 6. **The driver repeats steps 2 to 5 to build candidates.**
-   - **Phase 1:** six pass-option variants (reassociation on or off, `mac` on reductions, speculation), each lowered with both allocators.
+   - **Phase 1:** eight pass-option variants (reassociation, `mac` on reductions, speculation, and disabling strength reduction), each lowered with the unlimited-names allocator and, when scratch is safe and more than K names are needed, the K-name allocator.
    - **Phase 2:** the best distinct phase-1 programs go through the register-form transforms (rotate plus unroll, thread, peel) and the whole pipeline again.
    - **Phase 3:** two rounds of jump threading on the best programs so far.
 
-   The variant search runs only for programs of up to 4,000 instructions. A larger program gets the default pipeline once, so a 100,000-instruction program takes about one second.
+   The variant search runs only for programs of up to 4,000 instructions. A larger program gets the default pipeline once. Measure large-program runtime on the target machine; this threshold does not by itself establish a time bound.
 
 ## 3. Each pass
 
@@ -121,8 +121,8 @@ n is the number of instructions, b the number of blocks.
 | Fusion | `mul` + `add` becomes `mac`, `shl` + `add` becomes `addsh`, and `x*(2^k+1)` becomes `addsh x, x, k`. A multiply in a reduction is not fused unless the multiply itself is on the recurrence. | O(n) | Same arithmetic. Only used when the machine has the instruction. |
 | SSA destruction | Phi inputs become parallel copies at the end of the predecessor, or in a new block on a critical edge. Copies are ordered so that no source is overwritten too early, using a temporary to break cycles. | O(n) | Parallel copy semantics are preserved exactly. |
 | Allocation, unlimited names | Interference graph from liveness. Copy-related values that do not interfere are merged, largest-weight copies first. Then smallest-last greedy colouring. | O(n + edges) | Values that are live at the same time never share a name. |
-| Allocation, K names | Chaitin-Briggs: conservative (Briggs) coalescing, simplify and select with K colours. A value that cannot be coloured lives in a scratch word (`4095 - slot`): a store after each definition, a load before each use. Repeated until colourable. | O(iterations · (n + edges)) | Used only when every load and store address of the program is provably below 3072, so the scratch words belong to kopt alone. The scratch region is not observable (spec section 7). |
-| Layout | Chains from the entry block. Each block is followed by its most frequent unplaced successor, preferring the successor that stays in the current loop. | O(b) | Order does not change semantics: every block ends in an explicit jump or branch. |
+| Allocation, K names | Chaitin-Briggs: conservative (Briggs) coalescing, simplify and select with K colours. A value that cannot be coloured lives in a scratch word (`4095 - slot`): a store after each definition, a load before each use. Copy-related spilled values share a scratch slot; short reload temporaries are protected from spilling. Repeated until colourable. | O(iterations · (n + edges)) | Used only when every load and store address of the program is provably below 3072, so the scratch words belong to kopt alone. The scratch region is not observable (spec section 7). |
+| Layout | Chains from the entry block. Each block is followed by its highest estimated-frequency unplaced successor, preferring the successor that stays in the current loop. Frequencies come from loop nesting, not profiles. | O(b) | Order does not change semantics: every block ends in an explicit jump or branch. |
 | Scheduling | List scheduling per block, in windows of 96 instructions, against the exact issue model (width, memory ports, latencies, in-order issue). The greedy choice is the earliest possible issue, then the longest path to the end of the block. | O(n · window) | See section 5 for the dependence rules. |
 | Loop rotation | A latch that jumps back to a small exit-test header gets a copy of the test. | O(n) | In register form, executing the header's instructions at the end of the latch is exactly what the jump did. |
 | Unroll, peel, thread | Block copies with redirected edges, all in register form. | O(n · factor) | Register form has no SSA names to repair. Every path of the new program executes the same instruction sequence as a path of the old one. |
@@ -135,7 +135,7 @@ n is the number of instructions, b the number of blocks.
 - **Latencies, `issue_width`, `mem_ports`.** The scheduler uses them directly. Fusion uses them too: `mac` only if `lat_mac <= lat_mul + lat_alu`, and `addsh` only if `lat_addsh <= 2 * lat_alu`. If `lat_mul < lat_alu`, a shift by a constant goes back to being a multiply.
 - **`fused_mac`, `fused_addsh`.** Fusion is skipped when the instruction is missing. The final program is checked again, and any leftover `mac` or `addsh` is expanded.
 - **`taken_branch_penalty`.** The if-conversion budget is 2 x (penalty + 1) instructions. Layout and unrolling reduce taken branches.
-- **`icache_size`, `icache_penalty`.** These bound unrolling and peeling (unrolled loops must fit `icache_size`), and they are part of every simulated cost.
+- **`icache_size`, `icache_penalty`.** These influence unrolling and peeling budgets, and they are part of every simulated cost. The unroll budget is `max(24, icache_size)`; peeling uses `2 * max(64, icache_size)` as its code-growth budget.
 
 The exact simulator decides between all candidates on the actual machine, so a new combination of numbers is handled the same way as the known ones.
 
@@ -155,14 +155,16 @@ The rules of spec section 7 are enforced in four places.
 
    A store to a constant scratch address is not observable and cannot trap, so only the memory rule orders it.
 3. **Memory reasoning.** Load forwarding, load hoisting and dead stores use an address model of base value plus constant offset, plus value ranges. Two addresses are distinct only if both are the same base with different offsets, or their ranges do not overlap.
-4. **Self-check.** The input and each candidate run on the same inputs:
+4. **Self-check.** Every candidate is checked on the timing sample. Candidates that improve its total cycles are then considered in score order and checked on the remaining inputs until one passes:
    - 16 typical inputs (moderate counts, small array values);
    - 64 inputs from the kit's own generator (edge values, special pairs, random);
    - 32 more with another seed.
 
    The result, trap kind and code, volatile log and data region must all match. Inputs where the input program does not finish are skipped, as in `kvalidate`. A failing candidate is dropped, and if every candidate fails, the input is written unchanged.
 
-Determinism: no clock, no unseeded randomness. Every choice depends only on the program and the machine, including the fixed-seed inputs used for timing.
+Finite testing cannot establish equivalence on every input, and both sides use the same interpreter port. Independent development checks use the kit interpreter; transformations still need semantic justification. A source timeout is skipped, so nontermination is not proved.
+
+Determinism: no clock-based choices, no unseeded randomness. `KOPT_TIMING` uses the clock for diagnostic output only. Every choice depends only on the program and the machine, including the fixed-seed inputs used for timing.
 
 ## 6. Profiles
 
@@ -170,6 +172,7 @@ The current version reads `--profile` but does not use it. Candidates are compar
 
 ## 7. Known problems
 
+- **Finite self-check.** Candidate testing cannot prove equivalence, detect every miscompilation, or establish preservation of nontermination. It may miss errors beyond the fixed input set.
 - **Small-input bias.** The choice between candidates uses kopt's own typical inputs. If the hidden input is very different (for example a loop count of 100,000), a candidate tuned for short runs can be slightly slower than another candidate would have been. It is never wrong, only slower.
 - **Variant search size limit.** The search is limited to programs of up to 4,000 instructions. Larger programs get the default pipeline only, to stay far inside the time limits.
 - **Counted loops.** Counted loops still test the exit condition in every unrolled copy.

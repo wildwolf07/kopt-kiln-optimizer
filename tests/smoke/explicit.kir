@@ -1,0 +1,4 @@
+func explicit(v0)
+entry:
+  store 12, 99
+  trap v0
