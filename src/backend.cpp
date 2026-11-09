@@ -761,6 +761,28 @@ static void duplicateReturns(Program &p) {
     p.blocks.swap(kept);
 }
 
+// Spill stores to a scratch word that no instruction ever loads are dead.
+// Only called when every address of the program itself was proven below the
+// scratch region, so the only scratch accesses are our constant-address
+// spill slots.
+static void dropUnreadSpillStores(Program &p) {
+    std::set<uint32_t> read;
+    for (const Block &b : p.blocks)
+        for (const Instr &x : b.ins)
+            if (x.op == OP_LOAD && !x.src[0].isReg) read.insert(x.src[0].v);
+    for (Block &b : p.blocks) {
+        std::vector<Instr> out;
+        out.reserve(b.ins.size());
+        for (const Instr &x : b.ins) {
+            if (x.op == OP_STORE && !x.src[0].isReg && x.src[0].v >= kScratchBase && x.src[0].v < kMemWords &&
+                !read.count(x.src[0].v))
+                continue;
+            out.push_back(x);
+        }
+        b.ins.swap(out);
+    }
+}
+
 Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     const bool scratchFree = opt.spillToK && canSpillToScratch(f);
     estimateFrequencies(f);
@@ -836,6 +858,7 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
             out.ins.push_back(y);
         }
     }
+    if (haveK) dropUnreadSpillStores(p);
     duplicateReturns(p);
     if (opt.schedule) scheduleProgram(p, m);
     return p;
