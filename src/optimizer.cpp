@@ -203,10 +203,68 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
 
 }  // namespace
 
+// Canonical form: blocks in reverse postorder from the entry (the first
+// target of a branch placed right after it), unreachable blocks after them in
+// file order, and registers renamed in order of first appearance (parameters
+// first). Programs that differ only in block order or register names then get
+// the same output, so the result does not depend on how the input was
+// shuffled or renamed.
+Program canonicalize(const Program &p) {
+    const int nb = static_cast<int>(p.blocks.size());
+    std::vector<char> seen(nb, 0);
+    std::vector<int> post;
+    // Iterative DFS; successors pushed so that target[0] is visited last and
+    // therefore comes first in reverse postorder.
+    std::vector<std::pair<int, int>> st;
+    st.push_back({0, 0});
+    seen[0] = 1;
+    while (!st.empty()) {
+        auto &top = st.back();
+        const Block &b = p.blocks[top.first];
+        const Instr &t = b.ins.back();
+        int succ[2] = {-1, -1}, ns = 0;
+        if (t.op == OP_JMP) succ[ns++] = t.target[0];
+        else if (t.op == OP_BR) { succ[ns++] = t.target[1]; succ[ns++] = t.target[0]; }
+        if (top.second < ns) {
+            int s = succ[top.second++];
+            if (s >= 0 && s < nb && !seen[s]) { seen[s] = 1; st.push_back({s, 0}); }
+            continue;
+        }
+        post.push_back(top.first);
+        st.pop_back();
+    }
+    std::vector<int> order(post.rbegin(), post.rend());
+    for (int b = 0; b < nb; b++) if (!seen[b]) order.push_back(b);
+    std::vector<int> newIndex(nb, -1);
+    for (int i = 0; i < nb; i++) newIndex[order[i]] = i;
+    Program q;
+    q.name = p.name;
+    std::unordered_map<uint32_t, uint32_t> ren;
+    auto name = [&](uint32_t r) {
+        auto it = ren.find(r);
+        if (it != ren.end()) return it->second;
+        uint32_t n = static_cast<uint32_t>(ren.size());
+        ren.emplace(r, n);
+        return n;
+    };
+    for (uint32_t r : p.params) q.params.push_back(name(r));
+    for (int i = 0; i < nb; i++) {
+        Block b = p.blocks[order[i]];
+        for (Instr &x : b.ins) {
+            for (int s = 0; s < x.nsrc; s++) if (x.src[s].isReg) x.src[s].v = name(x.src[s].v);
+            if (hasDest(x.op)) x.dst = name(x.dst);
+            for (int k = 0; k < 2; k++) if (x.target[k] >= 0) x.target[k] = newIndex[x.target[k]];
+        }
+        q.blocks.push_back(b);
+    }
+    return q;
+}
+
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
     (void)profileText;
-    const Program base = usesUnsupported(orig, m) ? legalize(orig, m) : orig;
+    const Program canon = canonicalize(orig);
+    const Program base = usesUnsupported(canon, m) ? legalize(canon, m) : canon;
     SimProgram so(base);
     const int np = static_cast<int>(base.params.size());
     // Timing sample first: typical runs, then the small edge values. The rest of
