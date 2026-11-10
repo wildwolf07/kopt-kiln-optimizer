@@ -1703,6 +1703,26 @@ AddrForm addrForm(const Func &f, const std::vector<DefSite> &ds, Opnd a) {
 bool mustDiffer(const Func &f, const std::vector<DefSite> &ds, Opnd a, Opnd b) {
     AddrForm x = addrForm(f, ds, a), y = addrForm(f, ds, b);
     if (x.hasBase == y.hasBase && (!x.hasBase || x.base == y.base)) return x.off != y.off;
+    // Masked addresses (x & 4095, made by speculation): a memory access that
+    // runs uses a word in [0, 4096), and x & 4095 == x mod 4096. So the word of
+    // and(p + c1, 4095) can equal the word of q + c2 (same base p == q) only
+    // when c1 == c2 mod 4096. (An access whose address is out of range traps
+    // and reads or writes nothing.)
+    auto unmask = [&](Opnd o, bool &masked) {
+        masked = false;
+        if (o.isConst) return o;
+        const Inst *d = defInst(f, ds, o);
+        if (d && d->op == OP_AND && d->n == 2 && d->a[1].isC(kMemWords - 1) && !d->a[0].isConst) { masked = true; return d->a[0]; }
+        if (d && d->op == OP_AND && d->n == 2 && d->a[0].isC(kMemWords - 1) && !d->a[1].isConst) { masked = true; return d->a[1]; }
+        return o;
+    };
+    bool ma, mb;
+    const Opnd ua = unmask(a, ma), ub = unmask(b, mb);
+    if (ma || mb) {
+        AddrForm p = addrForm(f, ds, ua), q = addrForm(f, ds, ub);
+        if (p.hasBase && q.hasBase && p.base == q.base)
+            return ((p.off - q.off) & (kMemWords - 1)) != 0;
+    }
     // Disjoint value ranges.
     Range ra = rangeOf(f, ds, a, 6), rb = rangeOf(f, ds, b, 6);
     return ra.hi < rb.lo || rb.hi < ra.lo;
