@@ -72,7 +72,7 @@ bool licm(Func &f);                // hoist loop-invariant work into a preheader
 bool reassociate(Func &f);         // shorten loop-carried add chains
 bool balanceSums(Func &f);          // straight-line add chains -> balanced trees
 bool hornerSplit(Func &f, int registers);        // h*x+c chains -> k interleaved chains in x^k
-bool speculate(Func &f, int budgetPerEdge, bool maskLoads = false);   // hoist pure work above branches
+bool speculate(Func &f, int budgetPerEdge, bool maskLoads = false, bool loadsOnly = false);   // hoist pure work above branches
 bool fuseOps(Func &f, const Machine &m, bool fuseReductions = false);   // mac / addsh for this machine
 bool selectToAdd(Func &f);         // select(c, a, a+1) -> a + (c == 0)
 bool ifConvert(Func &f, const Machine &m);    // small branches -> select

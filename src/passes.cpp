@@ -3599,7 +3599,7 @@ bool licm(Func &f) {
 // latency gaps (for example the next unrolled iteration's division).
 // ---------------------------------------------------------------------------
 
-bool speculate(Func &f, int budgetPerEdge, bool maskLoads) {
+bool speculate(Func &f, int budgetPerEdge, bool maskLoads, bool loadsOnly) {
     f.resolveAll();
     f.rebuildPreds();
     std::vector<DefSite> ds = defSites(f);
@@ -3618,9 +3618,25 @@ bool speculate(Func &f, int budgetPerEdge, bool maskLoads) {
         bool unknownEffect = false;
         std::vector<char> definedHere(f.nvals, 0);
         for (const Inst &x : S.insts) if (x.dst >= 0) definedHere[x.dst] = 1;
+        // loadsOnly: hoist loads and the work in S that computes their
+        // addresses, nothing else (other work would only add instructions on
+        // the path that does not need it).
+        std::vector<char> feedsLoad;
+        if (loadsOnly) {
+            feedsLoad.assign(f.nvals, 0);
+            for (size_t k = S.insts.size(); k-- > 0;) {
+                const Inst &y = S.insts[k];
+                const bool need = y.op == OP_LOAD || (y.dst >= 0 && feedsLoad[y.dst]);
+                if (!need) continue;
+                const int first = y.op == OP_LOAD ? 0 : 0;
+                for (int a = first; a < (y.op == OP_LOAD ? 1 : y.n); a++)
+                    if (!y.a[a].isConst && y.a[a].v < f.nvals && definedHere[y.a[a].v]) feedsLoad[y.a[a].v] = 1;
+            }
+        }
         for (size_t i = 0; i + 1 < S.insts.size() && moved < budgetPerEdge;) {
             Inst x = S.insts[i];
             bool ok = x.dst >= 0;
+            if (ok && loadsOnly && x.op != OP_LOAD && !(x.dst < static_cast<int>(feedsLoad.size()) && feedsLoad[x.dst])) ok = false;
             // A load whose address is in memory only on this path (branch facts)
             // moves up with its address masked to 12 bits: always a valid word,
             // and the same word whenever the original load would have run.

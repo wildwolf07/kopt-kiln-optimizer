@@ -68,6 +68,7 @@ struct Flags {
     bool reassoc = true;         // shorten loop-carried add chains
     bool fuseReductions = false; // mac even on a reduction (fewer registers, longer chain)
     bool speculate = false;      // hoist pure work above branches
+    bool specLoadsOnly = false;  // ... but only loads and their address work
     bool strength = true;        // strength-reduce induction-variable multiplies
     bool loadPhis = false;       // loads at merges -> phis of known values
     bool tabulate = false;       // state-machine dispatch -> packed tables
@@ -164,7 +165,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             instSimplify(f);
             dce(f);
         }
-        if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width, true))) {
+        if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width, true, fl.specLoadsOnly))) {
             gvn(f);
             dce(f);
         }
@@ -782,20 +783,22 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         std::vector<Cand> more;
         size_t lpWork = 0, specWork = 0;   // deterministic budgets: instructions recompiled here
         for (size_t i = 0; i < best.size(); i++)
-            for (int ss = 0; ss < 3; ss++) {
+            for (int ss = 0; ss < 4; ss++) {
                 // ss == 2: speculation on the transformed program (work of an
                 // unrolled chain's later steps moves above its exit branches).
-                if (ss == 2 && best[i]->flags.speculate) continue;
-                size_t &budgetUsed = ss == 2 ? specWork : lpWork;   // separate budgets
+                // ss == 3: the same, hoisting only loads and their addresses.
+                if (ss >= 2 && best[i]->flags.speculate && !(ss == 3 && !best[i]->flags.specLoadsOnly)) continue;
+                size_t &budgetUsed = ss >= 2 ? specWork : lpWork;   // separate budgets
                 if (budgetUsed + best[i]->p.instrCount() > 8000) continue;
                 budgetUsed += best[i]->p.instrCount();
                 Flags fl = best[i]->flags;
-                fl.loadPhis = ss != 2;
+                fl.loadPhis = ss < 2;
                 fl.storeSel = ss == 1;
-                if (ss == 2) fl.speculate = true;
+                if (ss >= 2) fl.speculate = true;
+                if (ss == 3) fl.specLoadsOnly = true;
                 std::vector<Cand> got;
                 compileVariants(best[i]->p, m, opt.maxLevel, fl,
-                                best[i]->what + (ss == 2 ? "/spec" : ss ? "/ss" : "/lp"), ss != 2, got);
+                                best[i]->what + (ss == 3 ? "/specL" : ss == 2 ? "/spec" : ss ? "/ss" : "/lp"), ss < 2, got);
                 for (Cand &c : got) quick(c);
                 for (Cand &c : got) more.push_back(std::move(c));
             }
