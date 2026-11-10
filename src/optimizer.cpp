@@ -118,6 +118,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         if (level >= 2 && fl.loadPhis && passEnabled("dupret")) c |= TIMED("dupret", dupConstReturns(f, 32, 512));
         if (level >= 2 && fl.tabulate && passEnabled("tabulate"))
             for (int r = 0; r < 4 && TIMED("tabulate", tabulateDispatch(f)); r++) c = true;
+        if (level >= 2 && passEnabled("inclusive")) c |= TIMED("inclusive", normalizeInclusive(f));
         if (level >= 2 && passEnabled("closedform"))
             for (int r = 0; r < 4 && TIMED("closedform", closedFormLoops(f)); r++) c = true;
         if (level >= 2 && passEnabled("popcount"))

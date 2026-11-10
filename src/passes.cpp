@@ -3254,6 +3254,55 @@ bool tabulateDispatch(Func &f) {
     return false;
 }
 
+// Inclusive loop tests: "br lt(n, i), EXIT, BODY" (stay while i <= n) with i a
+// phi of the block and n not computed in it becomes
+// "br lt(i, n + 1), BODY, EXIT". Valid when n < INT_MAX (so n + 1 does not
+// wrap): !(n < i) == i <= n == i < n + 1. The exclusive form is the one the
+// counted-loop transformations recognise.
+bool normalizeInclusive(Func &f) {
+    f.resolveAll();
+    std::vector<DefSite> ds = defSites(f);
+    std::vector<int> uses(f.nvals, 0);
+    for (BB &B : f.bb) {
+        if (!B.alive) continue;
+        for (Phi &p : B.phis) for (auto &in : p.in) if (!in.second.isConst) uses[in.second.v]++;
+        for (Inst &x : B.insts) for (int a = 0; a < x.n; a++) if (!x.a[a].isConst) uses[x.a[a].v]++;
+    }
+    bool changed = false;
+    for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
+        BB &B = f.bb[b];
+        if (!B.alive || B.term().op != OP_BR || B.term().a[0].isConst) continue;
+        const Opnd c = B.term().a[0];
+        if (c.v >= static_cast<int>(ds.size()) || ds[c.v].block != b || ds[c.v].isPhi || uses[c.v] != 1) continue;
+        const int ci = ds[c.v].idx;
+        if (ci < 0 || ci >= static_cast<int>(B.insts.size()) || B.insts[static_cast<size_t>(ci)].dst != c.v) continue;
+        const Inst lt = B.insts[static_cast<size_t>(ci)];
+        if (lt.op != OP_LT) continue;
+        const Opnd n = lt.a[0], i = lt.a[1];
+        if (i.isConst) continue;
+        bool isPhi = false;
+        for (const Phi &ph : B.phis) if (ph.dst == i.v) isPhi = true;
+        if (!isPhi) continue;
+        if (!n.isConst && (n.v >= static_cast<int>(ds.size()) || ds[n.v].block == b)) continue;
+        if (rangeOf(f, ds, n, 6).hi >= 0x7FFFFFFFull) continue;   // n + 1 must not wrap
+        Opnd n1;
+        std::vector<Inst> pre;
+        if (n.isConst) n1 = Opnd::cst(n.c + 1);
+        else {
+            Inst a; a.op = OP_ADD; a.dst = f.newVal(); a.n = 2; a.a[0] = n; a.a[1] = Opnd::cst(1);
+            pre.push_back(a);
+            n1 = Opnd::val(a.dst);
+        }
+        Inst &x = B.insts[static_cast<size_t>(ci)];
+        x.a[0] = i;
+        x.a[1] = n1;
+        std::swap(B.term().tgt[0], B.term().tgt[1]);
+        B.insts.insert(B.insts.begin() + ci, pre.begin(), pre.end());
+        changed = true;
+    }
+    return changed;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);
@@ -3639,7 +3688,10 @@ bool reassociate(Func &f) {
         const size_t nins = f.bb[b].insts.size();
         for (size_t i = 0; i < nins; i++) {
             Inst root = f.bb[b].insts[i];
-            if (root.op != OP_ADD || root.dst >= static_cast<int>(rec.size()) || rec[root.dst] < 0) continue;
+            // add, mul, xor, and, or: associative and commutative on 32-bit words.
+            const Op rop = root.op;
+            if (rop != OP_ADD && rop != OP_MUL && rop != OP_XOR && rop != OP_AND && rop != OP_OR) continue;
+            if (root.dst < 0 || root.dst >= static_cast<int>(rec.size()) || rec[root.dst] < 0) continue;
             const int cyc = rec[root.dst];
             std::vector<Opnd> leaves;
             std::vector<Opnd> work{root.a[0], root.a[1]};
@@ -3648,7 +3700,7 @@ bool reassociate(Func &f) {
                 Opnd o = work.back();
                 work.pop_back();
                 const Inst *d = defInst(f, ds, o);
-                if (d && d->op == OP_ADD && uses[o.v] == 1 && ds[o.v].block == b && rec[o.v] == cyc && inner < 16) {
+                if (d && d->op == rop && uses[o.v] == 1 && ds[o.v].block == b && rec[o.v] == cyc && inner < 16) {
                     inner++;
                     work.push_back(d->a[0]);
                     work.push_back(d->a[1]);
@@ -3658,10 +3710,17 @@ bool reassociate(Func &f) {
             }
             if (inner == 0) continue;
             std::vector<Opnd> carried, rest;
-            uint32_t constSum = 0;
+            uint32_t constSum = (rop == OP_MUL) ? 1u : (rop == OP_AND ? 0xFFFFFFFFu : 0u);   // identity
             bool haveConst = false;
             for (Opnd o : leaves) {
-                if (o.isConst) { constSum += o.c; haveConst = true; }
+                if (o.isConst) {
+                    haveConst = true;
+                    if (rop == OP_ADD) constSum += o.c;
+                    else if (rop == OP_MUL) constSum *= o.c;
+                    else if (rop == OP_XOR) constSum ^= o.c;
+                    else if (rop == OP_AND) constSum &= o.c;
+                    else constSum |= o.c;
+                }
                 else if (o.v < static_cast<int>(rec.size()) && rec[o.v] == cyc) carried.push_back(o);
                 else rest.push_back(o);
             }
@@ -3669,15 +3728,36 @@ bool reassociate(Func &f) {
             if (haveConst) rest.push_back(Opnd::cst(constSum));
             std::vector<Inst> pre;
             Opnd acc = rest[0];
-            for (size_t k = 1; k < rest.size(); k++) {
-                Inst a;
-                a.op = OP_ADD;
-                a.dst = f.newVal();
-                a.n = 2;
-                a.a[0] = acc;
-                a.a[1] = rest[k];
-                pre.push_back(a);
-                acc = Opnd::val(a.dst);
+            if (rop == OP_ADD) {
+                for (size_t k = 1; k < rest.size(); k++) {
+                    Inst a;
+                    a.op = OP_ADD;
+                    a.dst = f.newVal();
+                    a.n = 2;
+                    a.a[0] = acc;
+                    a.a[1] = rest[k];
+                    pre.push_back(a);
+                    acc = Opnd::val(a.dst);
+                }
+            } else {
+                // Balanced tree (a multiply is several cycles: depth matters).
+                std::vector<Opnd> level = rest;
+                while (level.size() > 1) {
+                    std::vector<Opnd> next;
+                    for (size_t k = 0; k + 1 < level.size(); k += 2) {
+                        Inst a;
+                        a.op = rop;
+                        a.dst = f.newVal();
+                        a.n = 2;
+                        a.a[0] = level[k];
+                        a.a[1] = level[k + 1];
+                        pre.push_back(a);
+                        next.push_back(Opnd::val(a.dst));
+                    }
+                    if (level.size() % 2) next.push_back(level.back());
+                    level.swap(next);
+                }
+                acc = level[0];
             }
             Inst &r = f.bb[b].insts[i];
             r.a[0] = carried[0];
@@ -3930,6 +4010,7 @@ bool hornerSplit(Func &f, int registers) {
 bool selectToAdd(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);
+    std::vector<int> rec;   // recurrence ids, computed on first need
     bool changed = false;
     for (int b = 0; b < static_cast<int>(f.bb.size()); b++) {
         if (!f.bb[b].alive) continue;
@@ -3944,7 +4025,37 @@ bool selectToAdd(Func &f) {
                 const Inst *d = defInst(f, ds, inc);
                 if (d && d->op == OP_ADD && d->a[1].isC(1) && d->a[0] == other) { incSide = side; base = other; }
             }
-            if (incSide < 0) continue;
+            if (incSide < 0) {
+                // Loop-carried "if (c) a += k": select(c, a + k, a) == a + select(c, k, 0)
+                // (and the mirrored form). Only on a recurrence, where taking the
+                // select off the path through a shortens the carried chain.
+                if (rec.empty()) rec = recurrenceIds(f);
+                if (x.dst >= static_cast<int>(rec.size()) || rec[x.dst] < 0) continue;
+                for (int side = 1; side <= 2; side++) {
+                    const Opnd inc = x.a[side], other = x.a[3 - side];
+                    if (other.isConst || other.v >= static_cast<int>(rec.size()) || rec[other.v] != rec[x.dst]) continue;
+                    const Inst *d = defInst(f, ds, inc);
+                    if (!d || d->op != OP_ADD || ds[inc.v].block != b) continue;
+                    Opnd k;
+                    if (d->a[0] == other) k = d->a[1];
+                    else if (d->a[1] == other) k = d->a[0];
+                    else continue;
+                    // Constant steps are left alone (measured: no gain over the select form).
+                    if (k.isConst || (k.v < static_cast<int>(rec.size()) && rec[k.v] == rec[x.dst])) continue;
+                    Inst sel;
+                    sel.op = OP_SELECT; sel.dst = f.newVal(); sel.n = 3; sel.a[0] = c;
+                    sel.a[1] = side == 1 ? k : Opnd::cst(0);
+                    sel.a[2] = side == 1 ? Opnd::cst(0) : k;
+                    Inst &y = f.bb[b].insts[i];
+                    y.op = OP_ADD; y.n = 2; y.a[0] = other; y.a[1] = Opnd::val(sel.dst);
+                    auto &ins = f.bb[b].insts;
+                    ins.insert(ins.begin() + static_cast<long>(i), sel);
+                    i += 1;
+                    changed = true;
+                    break;
+                }
+                continue;
+            }
             std::vector<Inst> pre;
             auto mk = [&](Op op, Opnd p, Opnd q) {
                 Inst t;

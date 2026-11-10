@@ -1,0 +1,18 @@
+; own test program: factorial_wrap
+func factorial_wrap(v0)
+entry:
+  and v1, v0, 31
+  const v2, 1
+  const v3, 1
+  jmp h
+h:
+  lt v4, v1, v3
+  br v4, x, b
+b:
+  mul v5, v2, v3
+  mov v2, v5
+  add v6, v3, 1
+  mov v3, v6
+  jmp h
+x:
+  ret v2

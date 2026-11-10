@@ -1,0 +1,22 @@
+; own test program: find_first
+func find_first(v0, v1)
+entry:
+  and v2, v0, 63
+  const v3, 0
+  jmp h
+h:
+  lt v4, v3, v2
+  br v4, b, nf
+b:
+  load v5, v3
+  eq v6, v5, v1
+  br v6, found, cont
+cont:
+  add v7, v3, 1
+  mov v3, v7
+  jmp h
+found:
+  ret v3
+nf:
+  const v8, -1
+  ret v8
