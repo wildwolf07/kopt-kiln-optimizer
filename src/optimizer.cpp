@@ -165,6 +165,10 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
             instSimplify(f);
             dce(f);
         }
+        if (fl.specLoadsOnly && passEnabled("pipeloads") && TIMED("pipeloads", pipelineHeaderLoads(f))) {
+            gvn(f);
+            dce(f);
+        }
         if (fl.speculate && TIMED("speculate", speculate(f, 4 * m.issue_width, true, fl.specLoadsOnly))) {
             gvn(f);
             dce(f);
@@ -781,24 +785,16 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     if (effort == 2 && passEnabled("loadphis")) {
         const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
         std::vector<Cand> more;
-        size_t lpWork = 0, specWork = 0;   // deterministic budgets: instructions recompiled here
+        size_t lpWork = 0;   // deterministic budget: instructions recompiled here
         for (size_t i = 0; i < best.size(); i++)
-            for (int ss = 0; ss < 4; ss++) {
-                // ss == 2: speculation on the transformed program (work of an
-                // unrolled chain's later steps moves above its exit branches).
-                // ss == 3: the same, hoisting only loads and their addresses.
-                if (ss >= 2 && best[i]->flags.speculate && !(ss == 3 && !best[i]->flags.specLoadsOnly)) continue;
-                size_t &budgetUsed = ss >= 2 ? specWork : lpWork;   // separate budgets
-                if (budgetUsed + best[i]->p.instrCount() > 8000) continue;
-                budgetUsed += best[i]->p.instrCount();
+            for (int ss = 0; ss < 2; ss++) {
+                if (lpWork + best[i]->p.instrCount() > 8000) continue;
+                lpWork += best[i]->p.instrCount();
                 Flags fl = best[i]->flags;
-                fl.loadPhis = ss < 2;
+                fl.loadPhis = true;
                 fl.storeSel = ss == 1;
-                if (ss >= 2) fl.speculate = true;
-                if (ss == 3) fl.specLoadsOnly = true;
                 std::vector<Cand> got;
-                compileVariants(best[i]->p, m, opt.maxLevel, fl,
-                                best[i]->what + (ss == 3 ? "/specL" : ss == 2 ? "/spec" : ss ? "/ss" : "/lp"), ss < 2, got);
+                compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + (ss ? "/ss" : "/lp"), true, got);
                 for (Cand &c : got) quick(c);
                 for (Cand &c : got) more.push_back(std::move(c));
             }
@@ -880,6 +876,32 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         }
         for (Cand &c : arithmetic) cands.push_back(std::move(c));
+    }
+    // Speculation recompiles of the best programs so far, after the stages
+    // above (which seed from the best candidates and must keep their seeds):
+    // full speculation (work of an unrolled chain's later steps moves above
+    // its exit branches) and loads-only speculation with pipelined header
+    // loads. Own deterministic budget.
+    if (effort == 2 && passEnabled("latespec")) {
+        const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
+        std::vector<Cand> more;
+        size_t specWork = 0;
+        for (size_t i = 0; i < best.size(); i++)
+            for (int ss = 2; ss < 4; ss++) {
+                if (best[i]->flags.speculate && !(ss == 3 && !best[i]->flags.specLoadsOnly)) continue;
+                if (specWork + best[i]->p.instrCount() > 8000) continue;
+                specWork += best[i]->p.instrCount();
+                Flags fl = best[i]->flags;
+                fl.loadPhis = false;
+                fl.storeSel = false;
+                fl.speculate = true;
+                fl.specLoadsOnly = ss == 3;
+                std::vector<Cand> got;
+                compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + (ss == 3 ? "/specL" : "/spec"), false, got);
+                for (Cand &c : got) quick(c);
+                for (Cand &c : got) more.push_back(std::move(c));
+            }
+        for (Cand &c : more) cands.push_back(std::move(c));
     }
     if (effort == 2 && passEnabled("tracelayout")) {
         std::vector<const Cand *> best;

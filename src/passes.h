@@ -66,6 +66,7 @@ bool signedPowerTwo(Func &f, const Machine &m);
 bool divByConstant(Func &f, const Machine &m);   // bounded x / C, x % C -> multiply and shift
 bool tabulateDispatch(Func &f);    // small state-machine dispatch trees -> packed tables
 bool normalizeInclusive(Func &f);   // i <= n loop tests -> i < n + 1
+bool pipelineHeaderLoads(Func &f);  // header loads issued by each predecessor (masked), phi in the header
 bool dce(Func &f);                 // remove values nobody needs (never removes possible traps)
 bool deadStores(Func &f);          // remove stores overwritten before anything can observe them
 bool licm(Func &f);                // hoist loop-invariant work into a preheader

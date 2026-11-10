@@ -3370,6 +3370,117 @@ bool normalizeInclusive(Func &f) {
     return changed;
 }
 
+// Software-pipelined header loads. A load in a loop header, preceded there
+// only by pure non-trapping work, reads a word whose address is proven in
+// memory at the header. Each predecessor of the header (preheader and latch)
+// computes that address from its own incoming values and loads it, masked to
+// 12 bits, just before it branches; the header then takes the value through a
+// phi. When the header runs, the predecessor's address equals the header's (so
+// the mask changes nothing and the word is the same, read at the same point:
+// nothing executes between a predecessor's end and the header's start). When
+// the branch goes elsewhere, the masked load cannot trap and its value is
+// unused. The load's latency then overlaps the loop's back-edge branch.
+bool pipelineHeaderLoads(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    bool changed = false;
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const int h = li.loops[l].header;
+        if (irr[h] || h == 0) continue;
+        BB &H = f.bb[h];
+        if (H.preds.size() < 2 || H.preds.size() > 3) continue;
+        bool dupPred = false;
+        for (size_t x = 0; x < H.preds.size(); x++)
+            for (size_t y = x + 1; y < H.preds.size(); y++) if (H.preds[x] == H.preds[y]) dupPred = true;
+        if (dupPred) continue;
+        for (int p : H.preds) {
+            const Inst &t = f.bb[p].term();
+            if (t.op == OP_BR && t.tgt[0] == t.tgt[1]) dupPred = true;
+        }
+        if (dupPred) continue;
+        // Header prefix: pure non-trapping work, then the first load.
+        int loadAt = -1;
+        for (size_t i = 0; i + 1 < H.insts.size(); i++) {
+            const Inst &x = H.insts[i];
+            if (x.op == OP_LOAD) { loadAt = static_cast<int>(i); break; }
+            if (!isPure(x.op) || x.dst < 0) break;
+        }
+        if (loadAt < 0) continue;
+        const Inst ld = H.insts[static_cast<size_t>(loadAt)];
+        const Opnd A = f.resolve(ld.a[0]);
+        if (A.isConst) continue;   // constant addresses are hoisted by LICM already
+        if (rangeAt(f, ds, A, h, &d.idom).hi >= kMemWords) continue;
+        // Values of the header available at a predecessor's end: phis map to
+        // their incoming value, prefix instructions are recomputed, values from
+        // outside the header are used as they are.
+        std::vector<char> inPrefix(f.nvals, 0);
+        for (int i = 0; i < loadAt; i++) if (H.insts[static_cast<size_t>(i)].dst >= 0) inPrefix[H.insts[static_cast<size_t>(i)].dst] = 1;
+        bool ok = true;
+        std::vector<std::pair<int, Opnd>> incoming;   // (pred, loaded value there)
+        std::vector<std::pair<int, std::vector<Inst>>> plans;
+        for (int p : H.preds) {
+            std::unordered_map<int, Opnd> memo;
+            std::vector<Inst> emit;
+            std::function<bool(Opnd, Opnd &, int)> at = [&](Opnd o, Opnd &out, int depth) -> bool {
+                o = f.resolve(o);
+                if (o.isConst) { out = o; return true; }
+                auto it = memo.find(o.v);
+                if (it != memo.end()) { out = it->second; return true; }
+                if (depth > 12) return false;
+                const DefSite &dv = ds[o.v];
+                if (dv.block == h && dv.isPhi) {
+                    for (const Phi &ph : H.phis)
+                        if (ph.dst == o.v) {
+                            for (auto &in : ph.in) if (in.first == p) { out = f.resolve(in.second); memo[o.v] = out; return true; }
+                        }
+                    return false;
+                }
+                if (dv.block == h) {
+                    if (o.v >= static_cast<int>(inPrefix.size()) || !inPrefix[o.v]) return false;
+                    const Inst *x = defInst(f, ds, o);
+                    if (!x) return false;
+                    Inst c = *x;
+                    for (int a = 0; a < c.n; a++) if (!at(c.a[a], c.a[a], depth + 1)) return false;
+                    c.dst = f.newVal();
+                    emit.push_back(c);
+                    out = Opnd::val(c.dst);
+                    memo[o.v] = out;
+                    return true;
+                }
+                out = o;   // defined outside the header: dominates every predecessor's end
+                return true;
+            };
+            Opnd a2;
+            if (!at(A, a2, 0)) { ok = false; break; }
+            Inst m; m.op = OP_AND; m.dst = f.newVal(); m.n = 2; m.a[0] = a2; m.a[1] = Opnd::cst(kMemWords - 1);
+            Inst l2 = ld; l2.dst = f.newVal(); l2.a[0] = Opnd::val(m.dst);
+            emit.push_back(m); emit.push_back(l2);
+            incoming.push_back({p, Opnd::val(l2.dst)});
+            plans.push_back({p, emit});
+        }
+        if (!ok) continue;
+        // Values computed outside the header must dominate each predecessor:
+        // they dominate h (they are used there), and h's predecessors' ends
+        // are reached only through h's dominators or from inside the loop.
+        for (auto &pl : plans) {
+            auto &pi = f.bb[pl.first].insts;
+            pi.insert(pi.end() - 1, pl.second.begin(), pl.second.end());
+        }
+        Phi ph; ph.dst = f.newVal(); ph.in = incoming;
+        f.bb[h].phis.push_back(ph);
+        f.replaceAll(ld.dst, Opnd::val(ph.dst));
+        Inst &y = f.bb[h].insts[static_cast<size_t>(loadAt)];
+        y.op = OP_MOV; y.n = 1; y.a[0] = Opnd::val(ph.dst);
+        ds = defSites(f);
+        changed = true;
+    }
+    return changed;
+}
+
 bool dce(Func &f) {
     f.resolveAll();
     std::vector<DefSite> ds = defSites(f);

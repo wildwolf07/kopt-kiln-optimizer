@@ -1,0 +1,37 @@
+; descending insertion sort with a running checksum (header loads that the
+; loop pipelines into its predecessors; addresses proven in range)
+func pipelined_header_load(v0, v1)
+entry:
+  and v2, v0, 31
+  const v3, 1
+  const v20, 0
+  jmp oh
+oh:
+  lt v4, v3, v2
+  br v4, ob, ox
+ob:
+  load v5, v3
+  sub v6, v3, 1
+  jmp ih
+ih:
+  lt v7, v6, 0
+  br v7, ix, ib
+ib:
+  load v8, v6
+  lt v9, v8, v5
+  br v9, sh, ix
+sh:
+  add v10, v6, 1
+  store v10, v8
+  xor v20, v20, v8
+  sub v6, v6, 1
+  jmp ih
+ix:
+  add v11, v6, 1
+  store v11, v5
+  add v3, v3, 1
+  jmp oh
+ox:
+  load v12, 0
+  add v13, v20, v12
+  ret v13
