@@ -38,6 +38,16 @@ std::vector<DefSite> defSites(const Func &f) {
     return d;
 }
 
+// After instructions were inserted into block b only: the same table as
+// defSites(f), at the cost of one block instead of the whole function.
+void refreshBlockDefs(const Func &f, std::vector<DefSite> &d, int b) {
+    d.resize(f.nvals);
+    const BB &B = f.bb[b];
+    for (const Phi &p : B.phis) d[p.dst] = DefSite{b, -1, true};
+    for (int i = 0; i < static_cast<int>(B.insts.size()); i++)
+        if (B.insts[i].dst >= 0) d[B.insts[i].dst] = DefSite{b, i, false};
+}
+
 const Inst *defInst(const Func &f, const std::vector<DefSite> &ds, Opnd o) {
     // Values created after ds was computed are "unknown" (conservative).
     if (o.isConst || o.v < 0 || o.v >= static_cast<int>(ds.size())) return nullptr;
@@ -965,7 +975,7 @@ bool combineLinear(Func &f) {
             ins.insert(ins.begin() + it->first, it->second.begin(), it->second.end());
         }
         if (!inserts.empty()) {
-            ds = defSites(f);
+            refreshBlockDefs(f, ds, b);
             uses.resize(f.nvals, 0);
         }
     }
@@ -3766,7 +3776,7 @@ bool reassociate(Func &f) {
                 ins.insert(ins.begin() + static_cast<long>(it->first), it->second.begin(), it->second.end());
             }
             if (!mmInserts.empty()) {
-                ds = defSites(f);
+                refreshBlockDefs(f, ds, b);
                 uses.resize(f.nvals, 0);
             }
         }
@@ -3775,7 +3785,7 @@ bool reassociate(Func &f) {
             ins.insert(ins.begin() + it->first, it->second.begin(), it->second.end());
         }
         if (!inserts.empty()) {
-            ds = defSites(f);
+            refreshBlockDefs(f, ds, b);
             uses.resize(f.nvals, 0);
         }
     }

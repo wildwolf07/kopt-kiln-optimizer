@@ -274,7 +274,10 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce, bool spreadColors)
         // Class-level lists: representatives only, sorted, without duplicates.
         for (int v = 0; v < nv; v++) {
             if (!used[v] || find(v) != v) { std::vector<int>().swap(nbr[v]); continue; }
-            for (int &x : nbr[v]) x = find(x);
+            bool increasing = true;   // most lists are untouched by merging
+            int prev = -1;
+            for (int &x : nbr[v]) { x = find(x); if (x <= prev) increasing = false; prev = x; }
+            if (increasing) continue;
             std::sort(nbr[v].begin(), nbr[v].end());
             nbr[v].erase(std::unique(nbr[v].begin(), nbr[v].end()), nbr[v].end());
         }
