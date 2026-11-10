@@ -118,6 +118,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         if (level >= 2 && fl.loadPhis && passEnabled("dupret")) c |= TIMED("dupret", dupConstReturns(f, 32, 512));
         if (level >= 2 && fl.tabulate && passEnabled("tabulate"))
             for (int r = 0; r < 4 && TIMED("tabulate", tabulateDispatch(f)); r++) c = true;
+        if (level >= 2 && passEnabled("inclusive")) c |= TIMED("inclusive", normalizeInclusive(f));
         if (level >= 2 && passEnabled("closedform"))
             for (int r = 0; r < 4 && TIMED("closedform", closedFormLoops(f)); r++) c = true;
         if (level >= 2 && passEnabled("popcount"))
@@ -284,6 +285,14 @@ Program traceLayout(const Program &p, const std::vector<Input> &inputs, bool cha
 
 // Optimize `in` with the SSA pipeline and lower it; with both register
 // allocators when the plain one needs more names than the machine has.
+// Deterministic compile-work meter (instructions lowered; K-name allocation
+// counts three times). Phase 1 always runs in full; once the budget is spent,
+// later stages stop trying K-name allocations, the costly part. It counts
+// work, never time, so the output is the same on every machine and run.
+size_t gCompileWork = 0;
+bool gWorkLimited = false;      // true from phase 2 on
+const size_t kWorkBudget = 150000;
+
 void compileVariants(const Program &in, const Machine &m, int level, const Flags &fl, const std::string &tag,
                      bool tryK, std::vector<Cand> &out, bool plainOnly = false) {
     Func f;
@@ -298,6 +307,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     std::vector<std::string> texts;
     auto emit = [&](bool pre, bool k, const char *suffix, bool spread = false) -> const Program * {
         if (pre && !passEnabled("preschedule")) return nullptr;
+        if (k && gWorkLimited && gCompileWork > kWorkBudget) return nullptr;
         Func g = f;
         BackendOptions bo;
         bo.preSchedule = pre;
@@ -310,6 +320,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
             c.p = lowerToProgram(g, m, bo);
         }
         if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
+        gCompileWork += c.p.instrCount() * (k ? 3 : 1);
         std::string text = printProgram(c.p);
         for (const std::string &t : texts) if (t == text) return nullptr;
         texts.push_back(text);
@@ -443,6 +454,8 @@ const size_t kSeeds = 5;   // distinct programs seeding the late stages
 
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
+    gCompileWork = 0;
+    gWorkLimited = false;
     const Program canon = canonicalize(orig);
     const Program base = usesUnsupported(canon, m) ? legalize(canon, m) : canon;
     SimProgram so(base);
@@ -582,6 +595,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : p1) quick(c);
         for (Cand &c : p1) cands.push_back(c);
+        gWorkLimited = true;
     }
     // Phase 2: loop rotation and unrolling on the register form of the best
     // phase-1 results, then the whole pipeline again.
@@ -765,16 +779,22 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     if (effort == 2 && passEnabled("loadphis")) {
         const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
         std::vector<Cand> more;
-        size_t lpWork = 0;   // deterministic budget: instructions recompiled here
+        size_t lpWork = 0, specWork = 0;   // deterministic budgets: instructions recompiled here
         for (size_t i = 0; i < best.size(); i++)
-            for (int ss = 0; ss < 2; ss++) {
-                if (lpWork + best[i]->p.instrCount() > 8000) continue;
-                lpWork += best[i]->p.instrCount();
+            for (int ss = 0; ss < 3; ss++) {
+                // ss == 2: speculation on the transformed program (work of an
+                // unrolled chain's later steps moves above its exit branches).
+                if (ss == 2 && best[i]->flags.speculate) continue;
+                size_t &budgetUsed = ss == 2 ? specWork : lpWork;   // separate budgets
+                if (budgetUsed + best[i]->p.instrCount() > 8000) continue;
+                budgetUsed += best[i]->p.instrCount();
                 Flags fl = best[i]->flags;
-                fl.loadPhis = true;
+                fl.loadPhis = ss != 2;
                 fl.storeSel = ss == 1;
+                if (ss == 2) fl.speculate = true;
                 std::vector<Cand> got;
-                compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + (ss ? "/ss" : "/lp"), true, got);
+                compileVariants(best[i]->p, m, opt.maxLevel, fl,
+                                best[i]->what + (ss == 2 ? "/spec" : ss ? "/ss" : "/lp"), ss != 2, got);
                 for (Cand &c : got) quick(c);
                 for (Cand &c : got) more.push_back(std::move(c));
             }

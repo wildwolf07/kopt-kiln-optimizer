@@ -1,0 +1,18 @@
+; own test program: power_loop
+func power_loop(v0, v1)
+entry:
+  and v2, v1, 31
+  const v3, 1
+  const v4, 0
+  jmp h
+h:
+  lt v5, v4, v2
+  br v5, b, x
+b:
+  mul v6, v3, v0
+  mov v3, v6
+  add v7, v4, 1
+  mov v4, v7
+  jmp h
+x:
+  ret v3

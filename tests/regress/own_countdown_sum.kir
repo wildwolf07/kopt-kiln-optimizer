@@ -1,0 +1,17 @@
+; own test program: countdown_sum
+func countdown_sum(v0)
+entry:
+  and v1, v0, 1023
+  const v2, 0
+  jmp h
+h:
+  lt v3, 0, v1
+  br v3, b, x
+b:
+  add v4, v2, v1
+  mov v2, v4
+  sub v5, v1, 3
+  mov v1, v5
+  jmp h
+x:
+  ret v2

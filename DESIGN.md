@@ -85,7 +85,7 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
 6. For full-effort programs: a flatten chain (split irreducible cycles, peel by
    16, thread, recompile; up to four steps on the best three distinct programs,
    under a deterministic budget of compiled instructions); a load-phi stage
-   recompiling the best five distinct programs (at most 8,000 instructions) with load phis and return-block copies, with and without store selects; then pressure-aware scheduling, bounded
+   recompiling the best five distinct programs (at most 8,000 instructions; plus, under its own 8,000-instruction budget, a speculation recompile of seeds built without speculation) with load phis and return-block copies, with and without store selects; then pressure-aware scheduling, bounded
    rematerialization, pure-region tree ordering and arithmetic alternatives.
    Finally try chain/hot-block layouts and exact block/suffix sharing from up to eight good candidates.
    A final backward-scheduling stage offers four lowering alternatives for each
@@ -133,7 +133,8 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | CFG cleanup | Reachability, branch folding, merging and jump threading. | Keep the same selected execution paths/instructions. |
 | LICM | Move invariant pure/safe work to preheaders; roughly O(n·L). | Hoisted operations cannot introduce traps. Divisor nonzero facts must hold on the preheader edge; loads also need valid addresses and no aliasing loop store. |
 | Strength reduction | Replace i*c by a coupled recurrence; O(n) scanning plus CFG work. | The recurrence uses wrapping arithmetic. Save destination IDs before vector insertion so shifted instructions cannot be mistaken for the replacement. |
-| Reassociation | Shorten loop-carried addition chains; graph/SCC work. | Wrapping addition is associative and commutative. |
+| Reassociation | Shorten loop-carried chains of add, mul, xor, and, or: the carried value joins last, the other terms form their own tree (balanced for the non-add operators) with constants folded; graph/SCC work. | Each of these operators is associative and commutative on 32-bit words (add and mul wrap). |
+| Inclusive tests | "br lt(n, i), EXIT, BODY" with i a phi of the block and n defined elsewhere becomes "br lt(i, n+1), BODY, EXIT", the form the counted-loop transformations accept. | Needs n < INT_MAX (range proof) so n+1 does not wrap; then !(n < i) == i < n+1. |
 | Sum balancing | In the load-phi stage's store-select variant, a chain of single-use adds outside loop recurrences with 4+ terms becomes a balanced tree when that cuts its depth by 2 or more. | 32-bit addition wraps, so it is associative and commutative. |
 | Dispatch tables | In one extra phase-1 variant: a loop's state phi s = phi(c0, s') where s' merges, at the join J of a branch region R (entered from E = idom(J), every path reconverging at J, pure instructions only), only constants or s. The region's other inputs must be one small key t (proven range [0, m], m <= 15) or values R passes on unchanged or plus a constant. R is evaluated at compile time for every (s, t) pair (symbolic base + constant values); each phi of J becomes a packed table read with shifts (one or two 32-bit words, entries stored relative to their minimum, states remapped through a nibble table when that shrinks the index). E then jumps straight to J. | s ranges over a finite set closed under the region (proven by following its phis to constants), t's range is proven, and each table entry is what the path for that pair computes. Pairs that cannot occur hold zero and are never read. Values made in R may not be used outside it except through J's phis. Tested on 150 random state machines in strict mode. |
 | Closed-form loops | A loop that exits only at its header test (i < n, i <= n, i > n or i >= n; n invariant; i = phi(i0, i +- k), constant 1 <= k <= 65536, counting toward n), with a pure body whose other header phis are accumulators s' = s + c0 + c1*i + c2*i^2 + c3*i^3 (invariant c), is replaced by its exit values computed before it: T = (i0 < n') ? ceil((n' - i0)/k) : 0 (n' = n or n+1; a shift for power-of-two k, else div), S1 = T(T-1)/2 (halve the even factor), S2 = S1*(2T-1)*inv(3) mod 2^32, S3 = S1^2. | The sums are exact integer identities, and all of them hold modulo 2^32. Signed ranges must prove n' + k - 1 <= INT_MAX (so i never wraps), and for div that the rounded difference stays below 2^31. Pure bodies have no effects or traps to keep. Loop values may not be used outside except the header phis. |
@@ -142,7 +143,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Dead scratch stores | A store to a constant scratch word (3072..4095) that no load can read is removed. | The scratch region is not observable; a constant in-range address cannot trap. |
 | Min/max chains | In a block, a loop-carried chain of select(lt(p,q),q,p) (max) or select(lt(p,q),p,q) (min) becomes one carried step plus a balanced tree of the other inputs. | Signed min/max are associative and commutative and return one of their inputs, so every grouping gives the same bits. Inner nodes must have no other uses. |
 | Horner splitting | A chain h' = h*x + c of n >= 6 steps becomes k=2 chains in x^2 (k=4 in x^4 with 16+ registers), combined at the end. Values it creates are never split again. | Wrapping arithmetic is a commutative ring, so any regrouping of the polynomial is exact. Inner products and sums must be single-use. |
-| Counting selects | select(c, a, a+1) -> a + eq(c,0); select(c, a+1, a) -> a + (c != 0) (c itself when its range is 0..1). | Exact case analysis on c; the test leaves the a chain. |
+| Counting selects | select(c, a, a+1) -> a + eq(c,0); select(c, a+1, a) -> a + (c != 0) (c itself when its range is 0..1). On a loop recurrence, select(c, a+k, a) with non-constant k -> a + select(c, k, 0) (and mirrored). | Exact case analysis on c; the test leaves the a chain. |
 | Speculation | Bounded pure-work hoisting across eligible branches. A load whose address is proven in memory only on its own path (signed VRP plus branch facts) moves up as `and t, a, 4095; load t`, and may cross stores of the arm that provably touch other words. | Extra-path execution must have no observable effect and cannot trap. The masked address equals the original wherever the original load runs, so it reads the same word; elsewhere the value is unused. |
 | Fusion | Select mac/addsh patterns using machine availability/costs; O(n). | Preserve low-32-bit arithmetic; unavailable instructions never reach output. Reduction fusion is a candidate choice. |
 | If-conversion | Inline small safe arms and replace joins with select. | Both evaluated arms must be pure and non-trapping. |
@@ -241,6 +242,16 @@ facts of the block that defines it. Speculation, if-conversion, LICM and store
 selects therefore clear the recorded range of every value they move, and later
 queries recompute it from the operands. (A fuzz case showed a load hoisted out
 of a dead block whose range facts were contradictory.)
+
+Range tables are per function. The interval tables are indexed by one
+function's value numbers, so building a new function empties both of them. A
+stage that rebuilds a program and lowers it without running the range analyses
+then sees no facts (and stays conservative) instead of another function's.
+
+Compile work is bounded without the clock. A meter counts instructions lowered
+(K-name allocations count three times). Phase 1 always runs in full; once
+150,000 units are spent, later stages stop trying K-name allocations. The
+count depends only on the input, so both judge runs give the same file.
 
 ## 6. Profiles
 

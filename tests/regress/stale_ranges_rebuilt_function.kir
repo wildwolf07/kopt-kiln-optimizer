@@ -1,0 +1,39 @@
+; lowering a rebuilt function must not reuse another function's range facts (load vs div trap order)
+func f(v0, v1)
+entry:
+  and v12, v0, 7
+  and v16, v1, 7
+  const v13, 0
+  const v14, 0
+  const v15, 0
+  vstore 3, v5
+  jmp head
+head:
+  lt v17, v13, v12
+  br v17, body, exit
+body:
+  and v11, v0, v11
+  add v1, v3, v1
+  and v7, v4, 255
+  store v7, v11
+  const v11, 65535
+  shl v6, v3, v5
+  and v17, v1, 1
+  br v17, inc, latch
+inc:
+  add v15, v15, -1
+  jmp latch
+latch:
+  add v13, v13, 2
+  add v18, v15, 0
+  load v5, v18
+  div v11, v4, 0
+  add v3, 100, 4096
+  jmp head
+exit:
+  add v18, v15, 0
+  load v17, v18
+  xor v5, -8, v4
+  and v10, v6, 255
+  load v3, v10
+  ret v17

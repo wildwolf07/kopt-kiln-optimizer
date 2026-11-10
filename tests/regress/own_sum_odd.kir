@@ -1,0 +1,25 @@
+; own test program: sum_odd
+func sum_odd(v0)
+entry:
+  and v1, v0, 127
+  const v2, 0
+  const v3, 0
+  jmp h
+h:
+  lt v4, v3, v1
+  br v4, b, x
+b:
+  and v5, v3, 1
+  eq v6, v5, 1
+  br v6, t, e
+t:
+  add v7, v2, v3
+  mov v2, v7
+  jmp e
+e:
+  const v8, 1
+  add v9, v3, v8
+  mov v3, v9
+  jmp h
+x:
+  ret v2

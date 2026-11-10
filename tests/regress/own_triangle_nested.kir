@@ -1,0 +1,28 @@
+; own test program: triangle_nested
+func triangle_nested(v0)
+entry:
+  and v1, v0, 63
+  const v2, 0
+  const v3, 0
+  jmp oh
+oh:
+  lt v4, v3, v1
+  br v4, ob, ox
+ob:
+  const v5, 0
+  jmp ih
+ih:
+  lt v6, v5, v3
+  br v6, ib, ix
+ib:
+  add v7, v2, v5
+  mov v2, v7
+  add v8, v5, 1
+  mov v5, v8
+  jmp ih
+ix:
+  add v9, v3, 1
+  mov v3, v9
+  jmp oh
+ox:
+  ret v2
