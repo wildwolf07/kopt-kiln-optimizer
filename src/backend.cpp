@@ -248,31 +248,35 @@ Allocation allocate(Func &f, const Machine &m, bool coalesce, bool spreadColors)
         while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
         return x;
     };
-    // Neighbour lists as sorted vectors (hash sets cost several times the
-    // memory on dense 100k-instruction functions).
+    // Neighbour lists as vectors (hash sets cost several times the memory on
+    // dense 100k-instruction functions). During coalescing a list may name
+    // values that have since been merged into another class, so every lookup
+    // goes through find(); nothing rewrites the neighbours' lists (rewriting
+    // them was quadratic around values with very many neighbours).
     std::vector<std::vector<int>> nbr = std::move(g.adj);
-    auto has = [&](int a, int b) { return std::binary_search(nbr[a].begin(), nbr[a].end(), b); };
-    auto replaceIn = [&](int n, int from, int to) {
-        std::vector<int> &l = nbr[n];
-        auto it = std::lower_bound(l.begin(), l.end(), from);
-        if (it != l.end() && *it == from) l.erase(it);
-        auto jt = std::lower_bound(l.begin(), l.end(), to);
-        if (jt == l.end() || *jt != to) l.insert(jt, to);
+    auto interfere = [&](int a, int b) {   // class a and class b share an edge
+        const std::vector<int> &l = nbr[a].size() <= nbr[b].size() ? nbr[a] : nbr[b];
+        const int other = nbr[a].size() <= nbr[b].size() ? b : a;
+        for (int x : l) if (find(x) == other) return true;
+        return false;
     };
     if (coalesce) {
         std::stable_sort(moves.begin(), moves.end(), [](const Move &a, const Move &b) { return a.w > b.w; });
         for (const Move &mv : moves) {
             int a = find(mv.a), b = find(mv.b);
             // Parameters interfere pairwise, so two of them are never merged.
-            if (a == b || has(a, b)) continue;
+            if (a == b || interfere(a, b)) continue;
             if (nbr[a].size() < nbr[b].size()) std::swap(a, b);
             parent[b] = a;
-            std::vector<int> merged;
-            merged.reserve(nbr[a].size() + nbr[b].size());
-            std::set_union(nbr[a].begin(), nbr[a].end(), nbr[b].begin(), nbr[b].end(), std::back_inserter(merged));
-            for (int n : nbr[b]) replaceIn(n, b, a);
-            nbr[a].swap(merged);
+            nbr[a].insert(nbr[a].end(), nbr[b].begin(), nbr[b].end());
             std::vector<int>().swap(nbr[b]);
+        }
+        // Class-level lists: representatives only, sorted, without duplicates.
+        for (int v = 0; v < nv; v++) {
+            if (!used[v] || find(v) != v) { std::vector<int>().swap(nbr[v]); continue; }
+            for (int &x : nbr[v]) x = find(x);
+            std::sort(nbr[v].begin(), nbr[v].end());
+            nbr[v].erase(std::unique(nbr[v].begin(), nbr[v].end()), nbr[v].end());
         }
     }
     // Smallest-last ordering, then greedy coloring.
