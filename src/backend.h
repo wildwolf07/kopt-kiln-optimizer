@@ -19,6 +19,7 @@ struct BackendOptions {
     int spillReuse = 4;          // a reload serves later uses within this many instructions
     bool spreadColors = false;  // use spare hardware names to break false dependencies
     bool pressureSchedule = false; // alternative: finish local live ranges before opening more
+    bool bottomUpSchedule = false; // alternative: place users first, then their producers
 };
 
 // True when lowering with spillToK may use the scratch region (all of the

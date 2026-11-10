@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
         if (argc == 2 && std::string(argv[1]) == "guards") { guards(); return 0; }
         require(argc == 3, "usage: driver MODE REGISTERS < input.kir");
         const std::string mode = argv[1];
-        require(mode == "plain" || mode == "tree" || mode == "pressure" || mode == "combined", "bad mode");
+        require(mode == "plain" || mode == "tree" || mode == "pressure" || mode == "combined" || mode == "bottomup" || mode == "bottomupK", "bad mode");
         std::string text((std::istreambuf_iterator<char>(std::cin)), {}), err;
         Program p; Func f;
         require(parseProgram(text, p, err), err.c_str());
@@ -129,7 +129,10 @@ int main(int argc, char **argv) {
         }
         Machine m; m.registers = std::atoi(argv[2]);
         BackendOptions opt;
-        opt.preSchedule = opt.pressureSchedule = mode == "pressure" || mode == "combined";
+        opt.pressureSchedule = mode == "pressure" || mode == "combined";
+        opt.bottomUpSchedule = mode == "bottomup" || mode == "bottomupK";
+        opt.preSchedule = opt.pressureSchedule || opt.bottomUpSchedule;
+        opt.spillToK = mode == "bottomupK";
         // Exercise these exact transforms, without any SSA optimization pipeline.
         const Program result = lowerToProgram(f, m, opt);
         std::cerr << "changed=" << changed << " phis=" << phis << " maxpure=" << maxPure << '\n';
@@ -140,7 +143,7 @@ int main(int argc, char **argv) {
 }
 '''
 
-MODES = ("plain", "tree", "pressure", "combined")
+MODES = ("plain", "tree", "pressure", "combined", "bottomup", "bottomupK")
 MASK = (1 << 32) - 1
 
 
@@ -317,7 +320,7 @@ def main():
                     diff = K.first_difference(reference, actual)
                     assert not diff, (name, mode, inp, diff, candidate)
                     checks += 1
-            print("PASS", name, "(all four direct modes)", flush=True)
+            print("PASS", name, "(all six direct modes)", flush=True)
         assert tree_changes > 0, "tree transform never exercised"
         assert ("TRAP", "div_by_zero") in observed and ("TRAP", "bad_address") in observed
         assert any(status == "TRAP" and value.startswith("explicit(") for status, value in observed)
@@ -352,16 +355,17 @@ def main():
         original = K.compile_program(K.parse_program(text))
         deep_inputs = [inputs[i] for i in (0, 6, 7)]
         references = [execute(original, inp) for inp in deep_inputs]
-        for mode in ("tree", "combined"):
+        for mode in ("tree", "combined", "bottomup"):
             candidate, meta = lower(binary, text, mode, deep=True)
-            assert meta["maxpure"] >= 100000 and meta["changed"] == 1, meta
+            assert meta["maxpure"] >= 100000, meta
+            if mode != "bottomup": assert meta["changed"] == 1, meta
             compiled = K.compile_program(K.parse_program(candidate))
             for inp, reference in zip(deep_inputs, references):
                 actual = execute(compiled, inp)
                 diff = K.first_difference(reference, actual)
                 assert not diff, ("deep-100k", mode, inp, diff)
                 checks += 1
-        print("PASS deep-100000 tree + combined lowering with 512 KiB stack", flush=True)
+        print("PASS deep-100000 tree + combined + bottom-up lowering with 512 KiB stack", flush=True)
     print(f"PASS {checks} official-interpreter comparisons; region permutation, SSA, "
           "barrier positions, window edges, phi/liveOut, terminators and deep DFS checked")
 

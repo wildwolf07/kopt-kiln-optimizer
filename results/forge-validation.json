@@ -1,0 +1,66 @@
+{
+  "base": "f6088bb",
+  "stages": [
+    "backward scheduling",
+    "pure sinking",
+    "finite specialization",
+    "range cache isolation"
+  ],
+  "source_sha256": {
+    "src/arithmetic.cpp": "2c44a2da7a0565afa6d69a75f95e573c4d945b3097b219b5f4d74378ec77a2b9",
+    "src/backend.cpp": "74fe627a476b016a407a1cc89ec081acfdb35ceac1a406686b998c8468a7f296",
+    "src/backend.h": "1187a7306f8aa0eaab27e204b95639c5485d932af54ace49397702a084ab46d1",
+    "src/cfg.cpp": "ad03d94fc27bf403068d9f6ab8abb52f7c887feae7444e20e98c39683d66ff8c",
+    "src/cfg.h": "a7c6e3a67eadc1ae4f5520f2fbd3a12894c9eb9815d55eef598e64c8b1cd9a08",
+    "src/compact.cpp": "9550cbc77c06473166180d9279d4af532de5bc83cfaf4cdfeb3bc90fb34bca43",
+    "src/finite.cpp": "c66b9dccdf317bae2d21b5384477698d19b3f2e1cd32292624b6cadff3f4fbf7",
+    "src/ir.h": "772ae5146c00d232a7e95de84c441c9457cfd436f3a268ba0d61fb569caaa45c",
+    "src/kir.cpp": "14ef22c98672d014106d1be59f3011ed9a1885153066b4bdca42213870d6b993",
+    "src/kir.h": "3c2fd990347f960a90f155ea9c1c73e77b6884cbc47efdb1bda9121103d411b4",
+    "src/loops.cpp": "725f5cf2243bd52268b6b5ff4d35a35b3a5b279b4578ced42e542d1f8f7887e6",
+    "src/loops.h": "b6d2c29a73c5628f3c0671ef0e8a77e62a49179a06852b4f86cb1d749fc28477",
+    "src/main.cpp": "53113b5f292681cb8bb3d85b31024bfe774af8bbbde6eb9828c378b2b0f59420",
+    "src/optimizer.cpp": "7edf521f58737d8de6033ef37b4ed6ecb01b0cbd4ffab9f669ba8ef6f19dfe2c",
+    "src/optimizer.h": "43401220569148f986fc38e6f86e1089961ee5c6320a6a240c6a01c1277be7a2",
+    "src/passes.cpp": "b521cfc703159dff45573e834096032762a9e2239bdd81908676b05e43a59223",
+    "src/passes.h": "a7714cc677d15dbf1c9b10477192abcace13fd3ed0682dc5a453aebfe4a2953a",
+    "src/pow2.cpp": "fd4e0893be0b7bceeefa88e00b6babb075008305cc9199e17d8b2122f55bfeb4",
+    "src/rematerialize.cpp": "1f441899c68d2749ea6e693f2b5b8628bbfa0ff6f844bb21ac230b674c4b694f",
+    "src/sim.cpp": "131a4f11fa7423c695ae5c67732631e2a93146ab0cff905b1d8ba5f84ed53b9c",
+    "src/sim.h": "f1adec7559859c9233de6247a5c849399a78550fd4a1d925198c0a5b54d3d6a0",
+    "src/sink.cpp": "07fb4a45c3361c11fac93e7fe1bdd844b5686bd0ecc760e12ec880dfa3e213a1",
+    "src/ssa.cpp": "002591fde933d6edec44867428fbb2d976c78dfd14b039c108df127f7612880f",
+    "src/tree_schedule.cpp": "13898f432eae9a679798b78456ea7c41166d56c1e12c6b1c58dc876e700330f2"
+  },
+  "gates": {
+    "practice_pairs": 500,
+    "validation_inputs_per_pair": 100,
+    "machine_sweep_pairs": 400,
+    "machine_seed": 1513,
+    "fuzz_programs": 4500,
+    "fuzz_seeds_and_counts": {
+      "1611": 2500,
+      "1711": 2000
+    },
+    "metamorphic_programs": 1000,
+    "metamorphic_seed": 1712,
+    "sanitizer_programs": 300,
+    "sanitizer_seed": 1714,
+    "regressions": 35,
+    "smoke_pairs": 50,
+    "negative_controls": 4,
+    "direct_schedule_comparisons": 4665,
+    "direct_sink_comparisons": 120960,
+    "direct_finite_comparisons": 5566,
+    "direct_cache_comparisons": 60
+  },
+  "sample_pair_changes_vs_base": {
+    "faster": 101,
+    "unchanged": 398,
+    "slower": 1
+  },
+  "linux_arm_100k_seconds": {
+    "straight": 3.66,
+    "loops": 13.11
+  }
+}

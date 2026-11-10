@@ -23,18 +23,20 @@ branch adds loop-nest flattening, irreducible-cycle splitting, closed forms
 for summation loops, population-count and bit-reverse idioms, state-machine
 dispatch tables, division by constants, min/max and Horner regrouping,
 counting selects, load phis, store selects, return-block copying and
-profile-guided timing inputs. This `optimizer-frontier` branch combines
+profile-guided timing inputs. The `optimizer-frontier` branch combines
 `optimizer-next` at `8a818d6` with spill-slot sharing and larger-program
 allocation from `58b5077`, pressure-aware scheduling, pure-region tree ordering,
-and bounded rematerialization. Other active worktrees are not modified.
+and bounded rematerialization. This `optimizer-forge` branch builds on `f6088bb` with backward scheduling,
+pure instruction sinking, source-derived finite-domain specialization, and a
+range-cache lifetime fix. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 10,102 | 10.26x |
-| few_registers | 202,164 | 25,592 | 15,706 | 12.87x |
-| no_fused | 107,966 | 20,218 | 13,050 | 8.27x |
-| slow_memory | 111,254 | 24,319 | 14,822 | 7.51x |
-| wide_fast | 55,744 | 12,923 | 7,766 | 7.18x |
+| default | 103,671 | 16,527 | 9,844 | 10.53x |
+| few_registers | 202,164 | 25,592 | 14,991 | 13.49x |
+| no_fused | 107,966 | 20,218 | 12,307 | 8.77x |
+| slow_memory | 111,254 | 24,319 | 14,138 | 7.87x |
+| wide_fast | 55,744 | 12,923 | 7,464 | 7.47x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
@@ -109,3 +111,11 @@ memory or trapping operations. Rematerialization duplicates only a bounded
 number of cheap parameter-based expressions, with guards against extending
 parameter lifetimes. These are measured alternatives, not unconditional choices.
 See [BENCHMARKS.md](BENCHMARKS.md) for paired results and individual regressions.
+
+Backward scheduling offers a second direction through the existing dependence
+graph. Pure sinking delays single-user expressions without crossing unsafe
+loop boundaries. Finite-domain specialization proves that a pure function
+depends on at most six input bits, exhaustively evaluates that complete domain,
+and emits a reduced decision graph. It derives every table from the supplied
+program at runtime; it has no stored program answers. [RESEARCH.md](RESEARCH.md)
+records the references, independent adaptations and rejected experiments.

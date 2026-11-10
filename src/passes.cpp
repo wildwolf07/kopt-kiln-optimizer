@@ -305,7 +305,7 @@ void computeIVRanges(Func &f) {
     }
 }
 
-void clearIVRanges() { gIVRange.clear(); }
+
 
 // ---------------------------------------------------------------------------
 // Value range propagation (signed intervals) with branch refinement.
@@ -653,6 +653,10 @@ bool tripCaps(const Func &f, const DomInfo &d, const std::vector<DefSite> &ds, c
 
 
 }  // namespace
+
+// A new SSA function reuses value numbers. Both unsigned induction facts and
+// signed VRP facts must be discarded before any query on that new function.
+void clearIVRanges() { gIVRange.clear(); gVRP.clear(); }
 
 void computeVRP(Func &f) {
     f.resolveAll();

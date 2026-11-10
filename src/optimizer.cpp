@@ -888,6 +888,56 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : compact) cands.push_back(std::move(c));
     }
+    if (effort == 2 && passEnabled("bottomup")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> scheduled;
+        for (const Cand *seed : seeds) {
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; mode++) {
+                if ((mode & 1) && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo; bo.preSchedule = true; bo.bottomUpSchedule = true;
+                bo.spillToK = (mode & 1) != 0; bo.spreadColors = (mode & 2) != 0;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + "/bottomup" + std::to_string(mode);
+                c.flags = seed->flags; quick(c); scheduled.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : scheduled) cands.push_back(std::move(c));
+    }
+    if (effort == 2 && passEnabled("sink")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> sunk;
+        for (const Cand *seed : seeds) {
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            if (!sinkInstructions(f)) continue;
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 6; mode++) {
+                if ((mode & 1) && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo;
+                bo.spillToK = (mode & 1) != 0;
+                bo.preSchedule = mode >= 2;
+                bo.bottomUpSchedule = mode >= 4;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + "/sink" + std::to_string(mode);
+                c.flags = seed->flags; quick(c); sunk.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : sunk) cands.push_back(std::move(c));
+    }
+    if (progSize <= 1000 && !dense && passEnabled("finite")) {
+        Cand c;
+        if (finiteFunction(base, m, c.p)) {
+            c.what = "finite"; quick(c);
+            cands.push_back(std::move(c));
+        }
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

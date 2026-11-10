@@ -17,7 +17,8 @@ Tree ordering also uses the register-need idea described by Appel and Supowit,
 Our shared-DAG ordering is a heuristic; it does not claim the optimality of a tree algorithm.
 The interpreter, timing model and fixed-seed generators are ports of the kit,
 as permitted. No optimizer framework, solver, or external optimizer code is
-used. Candidate decisions do not depend on filenames, hashes, the network or
+used. Additional research and experiment notes are in [RESEARCH.md](RESEARCH.md).
+Candidate decisions do not depend on filenames, hashes, the network or
 the wall clock.
 
 ## 1. What is implemented
@@ -45,7 +46,7 @@ with a positive constant step and an explicit signed-underflow guard.
 
 Back end: parallel-copy SSA destruction, unlimited-name and K-name allocation,
 copy-related spill webs, bounded-distance reload reuse, pre/post-allocation
-scheduling, a pressure-aware scheduling alternative, iterative pure-region tree
+scheduling, pressure-aware forward and backward alternatives, iterative pure-region tree
 ordering, optional legal color spreading, loop-based layout and trace-derived
 layout alternatives, copying of tiny return blocks into jumping predecessors,
 and removal of spill stores that are never reloaded. SSA memory facts allow the pre-allocation scheduler to
@@ -85,7 +86,13 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    under a deterministic budget of compiled instructions); a load-phi stage
    recompiling the best five distinct programs (at most 8,000 instructions) with load phis and return-block copies, with and without store selects; then pressure-aware scheduling, bounded
    rematerialization, pure-region tree ordering and arithmetic alternatives.
-   Finally try chain/hot-block layouts and exact block/suffix sharing from up to eight good candidates. Measure them with the exact same cycle model.
+   Finally try chain/hot-block layouts and exact block/suffix sharing from up to eight good candidates.
+   A final backward-scheduling stage offers four lowering alternatives for each
+   of the best four distinct programs, retaining all earlier candidates. A final
+   single-user pure sinking stage offers six additional lowerings per seed.
+   For input programs through 1,000 instructions and within the normal CFG/register
+   bounds, offer one source-derived finite-domain decision graph when proven.
+   Measure alternatives with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
 
@@ -108,6 +115,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | SSA | Dominators/frontiers, live phi placement and renaming; depends on CFG/frontiers and inserted phis. | Preserve def-use relations and incoming edges; undefined reads are zero. |
 | IV ranges | Recognize bounded positive-step recurrences; loop/phi analysis. | Continuing paths must pass the bound test without wrap. For a post-increment test, **init+step must also stay below 2^31**. |
 | Signed VRP | Monotone interval growth, widening to program thresholds, capped iteration and narrowing. At most 100 solving rounds; at most 192 thresholds. | Arithmetic that may wrap returns a conservative full interval. Only settled solutions are used. Branch facts apply on guarded paths/phi edges. |
+| Finite-domain specialization | In pure functions, require every remaining raw parameter read to be AND with a literal, with at most six total live input bits. Evaluate every projected input using the interpreter, then share identical decision subtables and use select for two constant leaves. Entry integration is capped to 1,000 input instructions; API also caps 256 blocks, eight parameters, 8,000 instructions, 20k steps/case and 1M total steps. | Replacing each raw input by input & union(masks) preserves all reads; SSA induction preserves control, values and termination. Exhaustive evaluation covers the complete proven domain, not a sample. Reject every memory/volatile operation, explicit trap, evaluated trap or timeout. Output only AND/branch/select/return. |
 | Trip caps | Enumerate at most 48 acyclic header-to-backedge paths, each bounded in length; follow constant phi changes. | A bounded, nondecreasing measure must grow on every path. Unknown changes, cycles and excessive path counts reject the proof. |
 | SCCP | Executable-edge/value lattice worklists; near-linear for sparse graphs. | Replace only constants on executable paths; never fold a trapping division. |
 | Simplification | Bounded rounds of exact identities and range-based comparisons. | KIR wraps modulo 2^32. Signed division-to-shift needs nonnegative operands; shifts mask their amount. |
@@ -143,7 +151,9 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Color spreading | Try additional interference-legal colors within a bounded hardware-name preference set. | Coloring legality is unchanged. Unlimited allocation may still need more names; the preference cap is not a semantic register limit. |
 | Scheduling | List scheduling in fixed windows, before/after allocation; O(n·w). | Preserve RAW/WAR/WAW, alias, trap and effect constraints. SSA memory ordinals must still match; otherwise facts are disabled. |
 | Pressure scheduling | An extra pre-allocation alternative prefers last uses over new live definitions when ready issue times tie and K is nearly full; O(n·w) plus liveness. Exported values and exact backwards window-boundary sets retain future uses. | Only priorities change; the existing dependency/effect graph is unchanged. |
+| Backward scheduling | Build a reverse topological order from sink instructions, estimate backwards liveness from exact liveOut/window boundaries, and balance reverse issue time against excess live values weighted by the machine's spill penalty. Try compact/spread colors with and without scratch allocation. With fixed window w=96, dependency construction is O(n·w) and ready-set scoring is O(n·w²) worst case. | Uses the identical RAW/WAR/WAW, memory, trap and effect graph as forward scheduling. Emits every instruction once and retains the terminator. Priorities never remove a dependence; reverse issue times are heuristics, not inserted delays. |
 | Pure-region tree ordering | Order dependencies by estimated register need, then emit iterative postorder inside contiguous pure SSA regions; O(n), at most three operands per instruction. Used as an extra large-program or late-search candidate. | Emit every original instruction once, after its operands; never cross memory, division, volatile operations or control flow. No algebraic rewrites or recursion. Shared DAG estimates are heuristic. |
+| Pure instruction sinking | Move single-user nontrapping pure instructions just before their user, possibly into a dominated block. Pin phi users; forbid loop-depth increases, movement into another loop and cross-block irreducible moves. Iterative dependency-forest rewrite; value scans O(n), CFG analyses bounded to 256 blocks, 100k instructions and 300k values. | Operands must dominate the destination. Single-user chains move together without cloning; pure operations may cross effects because they cannot affect them or trap. Moves never increase loop nesting. |
 | Rematerialization | Offer at most 64 copies of cheap one-instruction parameter/constant recipes with 2–8 separated instruction users; O(n) scanning and fixed-budget cloning. No phi users; no GVN afterward. | Immutable leaves dominate every use. No effects/traps. Each parameter already has an independent use at/after the clone in its block, excluding all recipe definitions, so moving recipes does not invalidate the lifetime guard. |
 | Rotation/unroll/peel/thread | Duplicate/register-form blocks and redirect edges; O(n·U) within code-growth budgets. | Each new path executes the same original instructions, except tests established redundant. |
 | Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
@@ -188,6 +198,12 @@ loads/stores. Compact and spread-color alternatives can differ in false
 register dependencies, so they are compared rather than assumed faster.
 
 ## 5. Keeping the behaviour
+
+SSA value numbers restart for each function. Both unsigned induction ranges and
+signed VRP caches are cleared whenever buildSSA starts. Keeping the signed cache
+across functions could falsely prove a fresh load safe and move it across a
+volatile operation. A saved whole-pipeline regression and a direct poisoned-cache
+test exercise this boundary.
 
 The contract is returned value or trap kind/code, ordered volatile log, and words
 0–3071 at termination/trap. Source operands are read before destinations change.
@@ -243,6 +259,10 @@ estimates, and the layout candidates use frequencies from our own fixed
 inputs. Neither profiles nor sampled runs establish semantic facts.
 
 ## 7. Known problems
+
+- Finite specialization handles only tiny statically proven masked-input domains
+  with no memory effects. Failure of any gate retains existing candidates. Its
+  lookup graph may lose to ordinary arithmetic, so it is always measured.
 
 - The training inputs can favor one candidate over another that would win on an
   unseen input. Some public individual cases regress despite better totals.

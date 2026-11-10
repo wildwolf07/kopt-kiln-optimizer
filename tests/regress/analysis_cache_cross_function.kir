@@ -1,0 +1,66 @@
+func f(v0)
+b0:
+  const v16, 3
+  shr v7, 3072, v12
+  add v13, v13, 2
+  lt v11, v13, v7
+  br v11, b0, b3
+b1:
+  addsh v4, v9, v12, 26
+  select v1, v14, v10, 31
+  and v10, v9, 63
+  store v10, v6
+  vload v6, 0
+  and v10, v4, 63
+  load v0, v10
+  and v6, v2, 255
+  load v1, v6
+  sub v16, v16, 1
+  br v16, b1, b7
+b2:
+  xor v7, v9, 63
+  xor v6, v0, v12
+  mul v3, v13, v0
+  mod v15, v15, 1
+  sub v16, v16, 1
+  br v16, b1, b8
+b3:
+  and v3, v2, v14
+  addsh v5, 65535, 4096, 3
+  br v9, b4, b2
+b4:
+  and v14, v11, 15
+  load v9, v14
+  sub v16, v16, 1
+  br v16, b4, b7
+b5:
+  shl v4, -2147483648, 7
+  eq v11, v3, 1234567
+  add v3, v3, 3
+  lt v9, v3, v14
+  br v9, b5, b8
+b6:
+  mov v0, v11
+  eq v1, 1, 5
+  const v3, 16
+  shr v12, v5, v8
+  sub v16, v16, 1
+  br v16, b5, b8
+b7:
+  load v6, v3
+  add v3, 7, v5
+  or v15, v10, v12
+  select v7, v1, v10, v7
+  add v13, v13, 3
+  lt v5, v13, v11
+  br v5, b7, b8
+b8:
+  vload v2, v2
+  and v1, v15, v0
+  addsh v13, v15, v6, 17
+  addsh v0, v11, 4096, 27
+  vstore 3, v7
+  select v12, v8, v2, v10
+  and v3, v6, 7
+  load v6, v3
+  ret -2

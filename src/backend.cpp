@@ -747,7 +747,7 @@ std::vector<int> layoutBlocks(Func &f) {
 
 bool canSpillToScratch(Func &f) { return memoryAccessesBelow(f, kScratchBase); }
 
-void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf, bool pressure);
+void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf, bool pressure, bool bottomUp);
 
 // Copy a tiny return block (at most 3 instructions) into each block that
 // jumps to it: the jump and its taken-branch fence disappear. Then fold
@@ -861,7 +861,7 @@ Program lowerToProgram(Func &f, const Machine &m, const BackendOptions &opt) {
     // Optional: list-schedule on values before allocation, so independent
     // long-latency results get different registers (in-order issue waits for
     // a register's old value before writing it again).
-    if (opt.preSchedule) preScheduleFunc(f, m, memFacts, opt.pressureSchedule);
+    if (opt.preSchedule) preScheduleFunc(f, m, memFacts, opt.pressureSchedule, opt.bottomUpSchedule);
     Allocation A;
     bool haveK = false;
     if (scratchFree) {
@@ -943,7 +943,7 @@ namespace {
 // mi (pre-allocation scheduling only): facts about the block's memory
 // instructions; each one carries its ordinal in target[1].
 void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullptr, bool pressure = false,
-                   const std::vector<int> *exported = nullptr) {
+                   const std::vector<int> *exported = nullptr, bool bottomUp = false) {
     {
         const int n = static_cast<int>(blk.ins.size());
         if (n <= 2) return;
@@ -1039,6 +1039,72 @@ void scheduleBlock(Block &blk, const Machine &m, const BlockMemInfo *mi = nullpt
             int h = 0;
             for (int s : succ[i]) h = std::max(h, height[s]);
             height[i] = h + (hasDest(blk.ins[i].op) ? m.latency(blk.ins[i].op) : 1);
+        }
+        if (bottomUp) {
+            // Use the SAME register/effect/trap/memory graph, but select sinks
+            // and construct a reverse topological order. This keeps producers
+            // near their users without copying or speculating instructions.
+            std::vector<int> left(body), depth(body, 0), available;
+            std::vector<long> reverseAt(body, 0);
+            std::vector<std::vector<std::pair<int, int>>> outEdges(body);
+            for (int j = 0; j < body; j++) for (const auto &p : predLat[j]) {
+                outEdges[p.first].push_back({j, p.second});
+                depth[j] = std::max(depth[j], depth[p.first] + p.second);
+            }
+            for (int i = 0; i < body; i++) {
+                left[i] = static_cast<int>(succ[i].size());
+                if (!left[i]) available.push_back(i);
+            }
+            std::unordered_set<uint32_t> needed;
+            if (exported) for (int v : *exported) needed.insert(static_cast<uint32_t>(v));
+            for (int a = 0; a < blk.ins.back().nsrc; a++)
+                if (blk.ins.back().src[a].isReg) needed.insert(blk.ins.back().src[a].v);
+            auto increase = [&](const Instr &x) {
+                int d = hasDest(x.op) && needed.count(x.dst) ? -1 : 0;
+                for (int a = 0; a < x.nsrc; a++) if (x.src[a].isReg) {
+                    const uint32_t r = x.src[a].v;
+                    bool first = true;
+                    for (int z = 0; z < a; z++) if (x.src[z].isReg && x.src[z].v == r) first = false;
+                    if (first && (!needed.count(r) || (hasDest(x.op) && x.dst == r))) d++;
+                }
+                return d;
+            };
+            std::vector<Instr> reverse;
+            long cycle = 0;
+            int issued = 0, memIssued = 0;
+            while (!available.empty()) {
+                int best = -1; long bestTime = 0, bestCost = 0; int bestDelta = 0;
+                for (int j : available) {
+                    const Instr &x = blk.ins[j];
+                    long t = cycle;
+                    for (const auto &s : outEdges[j]) t = std::max(t, reverseAt[s.first] + s.second);
+                    const bool mem = isMemOp(x.op);
+                    if (t == cycle && (issued >= m.issue_width || (mem && memIssued >= m.mem_ports))) t++;
+                    const int delta = increase(x);
+                    const int excess = std::max(0, static_cast<int>(needed.size()) + delta - m.registers);
+                    const long cost = t + static_cast<long>(excess) * std::max(1, m.reg_spill_penalty);
+                    if (best < 0 || cost < bestCost || (cost == bestCost &&
+                        (delta < bestDelta || (delta == bestDelta &&
+                         (depth[j] > depth[best] || (depth[j] == depth[best] && j > best)))))) {
+                        best = j; bestTime = t; bestCost = cost; bestDelta = delta;
+                    }
+                }
+                const Instr &x = blk.ins[best];
+                if (bestTime > cycle) { issued = 0; memIssued = 0; }
+                cycle = bestTime; issued++; if (isMemOp(x.op)) memIssued++;
+                reverseAt[best] = bestTime;
+                if (hasDest(x.op)) needed.erase(x.dst);
+                for (int a = 0; a < x.nsrc; a++) if (x.src[a].isReg) needed.insert(x.src[a].v);
+                reverse.push_back(x);
+                available.erase(std::find(available.begin(), available.end(), best));
+                for (const auto &p : predLat[best]) if (--left[p.first] == 0) available.push_back(p.first);
+            }
+            if (static_cast<int>(reverse.size()) == body) {
+                std::reverse(reverse.begin(), reverse.end());
+                reverse.push_back(blk.ins.back());
+                blk.ins.swap(reverse);
+            }
+            return;
         }
         std::unordered_map<uint32_t, long> ready;   // register -> cycle its value is ready
         std::vector<long> doneAt(body, 0);          // issue cycle of scheduled instructions
@@ -1163,9 +1229,9 @@ void scheduleProgram(Program &p, const Machine &m) {
 // Pre-allocation scheduling: the same list scheduler, run on value numbers.
 // Each instruction carries its index in target[0] so the order maps back, and
 // memory instructions carry their ordinal in target[1] for the memory facts.
-void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf, bool pressure) {
+void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> &mf, bool pressure, bool bottomUp) {
     Liveness live;
-    if (pressure) live = computeLiveness(f);
+    if (pressure || bottomUp) live = computeLiveness(f);
     for (int bi = 0; bi < static_cast<int>(f.bb.size()); bi++) {
         BB &B = f.bb[bi];
         if (!B.alive || B.insts.size() <= 2) continue;
@@ -1190,11 +1256,11 @@ void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> 
         const int window = 96;
         const int n = static_cast<int>(w.ins.size());
         if (n <= window + 1) {
-            scheduleBlock(w, m, mi, pressure, pressure ? &live.liveOut[bi] : nullptr);
+            scheduleBlock(w, m, mi, pressure, (pressure || bottomUp) ? &live.liveOut[bi] : nullptr, bottomUp);
         } else {
             const int body = n - 1;
             std::vector<std::vector<int>> boundary;
-            if (pressure) {
+            if (pressure || bottomUp) {
                 boundary.resize((body + window - 1) / window);
                 std::unordered_set<int> future(live.liveOut[bi].begin(), live.liveOut[bi].end());
                 for (int a = 0; a < w.ins.back().nsrc; a++)
@@ -1217,7 +1283,7 @@ void preScheduleFunc(Func &f, const Machine &m, const std::vector<BlockMemInfo> 
                 stop.nsrc = 1;
                 stop.src[0] = Operand::imm(0);
                 part.ins.push_back(stop);
-                scheduleBlock(part, m, mi, pressure, pressure ? &boundary[start / window] : nullptr);
+                scheduleBlock(part, m, mi, pressure, (pressure || bottomUp) ? &boundary[start / window] : nullptr, bottomUp);
                 std::copy(part.ins.begin(), part.ins.end() - 1, w.ins.begin() + start);
             }
         }
