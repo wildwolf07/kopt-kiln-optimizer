@@ -45,10 +45,10 @@ Measured public and independently generated hardware results belong in
 BENCHMARKS.md. Research quality does not establish correctness or a hidden score:
 all retained changes need direct tests, whole-pipeline checks and bounded time.
 
-Finite-domain specialization combines a static information-dependence proof
-with exhaustive evaluation of at most 64 equivalence classes. Every raw
-parameter use remaining after safe SSA cleanup must be AND with a constant;
-the union of masks determines exactly which bits can matter. High bits,
+The initial forge specialization combined an input-dependence proof with
+exhaustive evaluation of at most 64 equivalence classes. It required every raw
+parameter use remaining after safe SSA cleanup to be AND with a constant;
+the current apex proof generalizes this restriction as described below. High bits,
 parameter aliases and phi users cannot silently bypass this gate. The original
 program is interpreted for all projected cases, with hard instruction budgets;
 any trap or timeout rejects the transformation. No input corpus is read.
@@ -66,7 +66,7 @@ older spill_storm result but changed later search seeds and regressed several
 other programs. That experiment is absent from production. The retained new
 stages append candidates after earlier searches to preserve their paths.
 
-The next finite-domain proof works backwards from observable result bits,
+The current apex finite-domain proof works backwards from observable result bits,
 complete branch operands and division/remainder divisors. For addition,
 subtraction and multiplication, a demanded output bit can depend on lower
 input bits, so the transfer fills every bit through the highest demand.
