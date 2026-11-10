@@ -91,7 +91,8 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    of the best four distinct programs, retaining all earlier candidates. A final
    single-user pure sinking stage offers six additional lowerings per seed.
    For input programs through 1,000 instructions and within the normal CFG/register
-   bounds, offer one source-derived finite-domain decision graph when proven.
+   bounds, offer source-derived finite-domain decision and packed-lookup alternatives when proven.
+   Their projection proof and exhaustive evaluation are shared within one call.
    Measure alternatives with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
@@ -115,7 +116,8 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | SSA | Dominators/frontiers, live phi placement and renaming; depends on CFG/frontiers and inserted phis. | Preserve def-use relations and incoming edges; undefined reads are zero. |
 | IV ranges | Recognize bounded positive-step recurrences; loop/phi analysis. | Continuing paths must pass the bound test without wrap. For a post-increment test, **init+step must also stay below 2^31**. |
 | Signed VRP | Monotone interval growth, widening to program thresholds, capped iteration and narrowing. At most 100 solving rounds; at most 192 thresholds. | Arithmetic that may wrap returns a conservative full interval. Only settled solutions are used. Branch facts apply on guarded paths/phi edges. |
-| Finite-domain specialization | In pure functions, require every remaining raw parameter read to be AND with a literal, with at most six total live input bits. Evaluate every projected input using the interpreter, then share identical decision subtables and use select for two constant leaves. Entry integration is capped to 1,000 input instructions; API also caps 256 blocks, eight parameters, 8,000 instructions, 20k steps/case and 1M total steps. | Replacing each raw input by input & union(masks) preserves all reads; SSA induction preserves control, values and termination. Exhaustive evaluation covers the complete proven domain, not a sample. Reject every memory/volatile operation, explicit trap, evaluated trap or timeout. Output only AND/branch/select/return. |
+| Finite-domain specialization | Backward bit-demand analysis on fresh SSA roots all returns/branches and every div/mod divisor. Propagate through phis, literal masks, logical shifts, comparisons and low-bit arithmetic until a fixed point; bounded exact constant folding exposes const/mov masks. Require at most six demanded raw input bits. Exhaustively interpret every projection, then emit a reduced decision graph. API caps 256 blocks, eight parameters, 8,000 instructions, 20k steps/case and 1M total steps; normal integration is capped at 1,000 instructions. | Projection preserves demanded result bits and full branch/divisor values. Fixed-point phi rules preserve the argument through loops. Exhaustive execution of the ORIGINAL program establishes return/totality for every equivalence class. Memory/volatile/explicit traps, projected traps and timeouts reject. |
+| Packed finite lookup | Pack table offsets from an unsigned base into 1/2/4/8/16/32-bit fields. High key bits select one of at most 16 words; low bits select a field through logical shift and mask. Restore the base with wrapping addition. | Offsets fit their fields, shifts never cross field boundaries, sparse/sign input bits retain their projected positions, fresh names exclude all input parameters. Width 32 bypasses shifts/masks. Decision/original alternatives remain available. |
 | Trip caps | Enumerate at most 48 acyclic header-to-backedge paths, each bounded in length; follow constant phi changes. | A bounded, nondecreasing measure must grow on every path. Unknown changes, cycles and excessive path counts reject the proof. |
 | SCCP | Executable-edge/value lattice worklists; near-linear for sparse graphs. | Replace only constants on executable paths; never fold a trapping division. |
 | Simplification | Bounded rounds of exact identities and range-based comparisons. | KIR wraps modulo 2^32. Signed division-to-shift needs nonnegative operands; shifts mask their amount. |
@@ -145,7 +147,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Return-block copies | In the load-phi stage, a return block (at most 32 instructions) gets a private copy for each predecessor whose phi inputs are all constants, within 512 new instructions; folding then shrinks the copy. | The block ends in ret, so its values have no other users; each path executes the same instructions with the same values. |
 | Irreducible splitting | Tarjan SCCs; each extra entry of a multi-entry region gets its own copy of the region within a code budget. | Copying blocks and redirecting edges in register form keeps every execution's instruction sequence. |
 | SSA destruction | Edge parallel copies, critical-edge splitting, temporary cycle breaking. | Read all copy sources before overwriting them. |
-| Unlimited allocation | Interference/coalescing and greedy coloring; O(n+E) plus set work. | Simultaneously live values cannot share a name. On eight million edge insertion attempts, use distinct names rather than build an unbounded dense graph; neighbour lists are sorted vectors to keep memory low. |
+| Unlimited allocation | Interference/coalescing and greedy coloring; O(n+E) plus set work. | Simultaneously live values cannot share a name. On eight million edge insertion attempts, use distinct names rather than build an unbounded dense graph; neighbour lists are vectors to keep memory low. Functions with more than 4,096 SSA values coalesce through lazy representatives and canonicalize edges before coloring; small functions keep the prior eager traversal order. |
 | K-name allocation | Conservative coalescing, ordered-set simplify/select, scratch spills and retry. Spill webs that are never live at the same time share a scratch word (greedy colouring over the interference graph of all members of each spilled web). Also tried for the largest programs; skipped when the graph exceeds 1.5 million edges. | Scratch is used only if original accesses are proven below 3072. Copy-related spill webs share a word only when legal. |
 | Reload reuse | Retain fresh load/result temporaries for nearby uses in a block. | Cached slot contents must still match; definitions/stores update or invalidate the entry. Failed retention retries without reuse. |
 | Color spreading | Try additional interference-legal colors within a bounded hardware-name preference set. | Coloring legality is unchanged. Unlimited allocation may still need more names; the preference cap is not a semantic register limit. |
@@ -260,7 +262,7 @@ inputs. Neither profiles nor sampled runs establish semantic facts.
 
 ## 7. Known problems
 
-- Finite specialization handles only tiny statically proven masked-input domains
+- Finite specialization handles only tiny statically proven input-bit domains
   with no memory effects. Failure of any gate retains existing candidates. Its
   lookup graph may lose to ordinary arithmetic, so it is always measured.
 

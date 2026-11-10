@@ -1,0 +1,73 @@
+{
+  "base": "dac7d75",
+  "allocator_source": "65e03e0",
+  "source_sha256": {
+    "src/arithmetic.cpp": "2c44a2da7a0565afa6d69a75f95e573c4d945b3097b219b5f4d74378ec77a2b9",
+    "src/backend.cpp": "489853b2c84c05bd87efcc623b597ddc2033d127fe31c64165cee97a78dd1537",
+    "src/backend.h": "1187a7306f8aa0eaab27e204b95639c5485d932af54ace49397702a084ab46d1",
+    "src/cfg.cpp": "ad03d94fc27bf403068d9f6ab8abb52f7c887feae7444e20e98c39683d66ff8c",
+    "src/cfg.h": "a7c6e3a67eadc1ae4f5520f2fbd3a12894c9eb9815d55eef598e64c8b1cd9a08",
+    "src/compact.cpp": "9550cbc77c06473166180d9279d4af532de5bc83cfaf4cdfeb3bc90fb34bca43",
+    "src/finite.cpp": "3fe8ab1b0bd6ac28d400119da7b8d40409ec8bf90ec3e50aff492f5ba2d4bdd1",
+    "src/finite_domain.cpp": "0a110e994e7328d20bba91c0c290da28150fe95ab940c873eeb25ca5105b912a",
+    "src/ir.h": "772ae5146c00d232a7e95de84c441c9457cfd436f3a268ba0d61fb569caaa45c",
+    "src/kir.cpp": "14ef22c98672d014106d1be59f3011ed9a1885153066b4bdca42213870d6b993",
+    "src/kir.h": "3c2fd990347f960a90f155ea9c1c73e77b6884cbc47efdb1bda9121103d411b4",
+    "src/loops.cpp": "725f5cf2243bd52268b6b5ff4d35a35b3a5b279b4578ced42e542d1f8f7887e6",
+    "src/loops.h": "b6d2c29a73c5628f3c0671ef0e8a77e62a49179a06852b4f86cb1d749fc28477",
+    "src/main.cpp": "53113b5f292681cb8bb3d85b31024bfe774af8bbbde6eb9828c378b2b0f59420",
+    "src/optimizer.cpp": "8aa72941fa3f109a3cfef604bd974d4f1c9ba595e4815ac500a5070f00c0bce3",
+    "src/optimizer.h": "43401220569148f986fc38e6f86e1089961ee5c6320a6a240c6a01c1277be7a2",
+    "src/passes.cpp": "856ba5d5e3881f885e64fae43ee6ca9bcb509912cf91b70e61e548df2e122c8f",
+    "src/passes.h": "f9d3774d67d2ef2361c7a13597c94d374be157f7313c38842f21338f4670ee88",
+    "src/pow2.cpp": "fd4e0893be0b7bceeefa88e00b6babb075008305cc9199e17d8b2122f55bfeb4",
+    "src/rematerialize.cpp": "1f441899c68d2749ea6e693f2b5b8628bbfa0ff6f844bb21ac230b674c4b694f",
+    "src/sim.cpp": "131a4f11fa7423c695ae5c67732631e2a93146ab0cff905b1d8ba5f84ed53b9c",
+    "src/sim.h": "f1adec7559859c9233de6247a5c849399a78550fd4a1d925198c0a5b54d3d6a0",
+    "src/sink.cpp": "07fb4a45c3361c11fac93e7fe1bdd844b5686bd0ecc760e12ec880dfa3e213a1",
+    "src/ssa.cpp": "002591fde933d6edec44867428fbb2d976c78dfd14b039c108df127f7612880f",
+    "src/tree_schedule.cpp": "13898f432eae9a679798b78456ea7c41166d56c1e12c6b1c58dc876e700330f2"
+  },
+  "gates": {
+    "sample_pairs": 500,
+    "random_validation_inputs": 100,
+    "machine_sweep_pairs": 400,
+    "machine_seed": 1813,
+    "generated_pairs": 60,
+    "generated_seed": 1818,
+    "fuzz_programs": 2500,
+    "fuzz_seed": 1811,
+    "metamorphic_programs": 1000,
+    "metamorphic_seed": 1812,
+    "sanitizer_programs": 300,
+    "sanitizer_seed": 1814,
+    "regressions": 35,
+    "smoke_pairs": 50,
+    "negative_controls": 4,
+    "direct_domain_comparisons": 10800,
+    "direct_finite_comparisons": 5566,
+    "direct_packed_comparisons": 19422,
+    "large_observable_inputs_each": 16
+  },
+  "practice_pair_changes": {
+    "faster": 0,
+    "unchanged": 500,
+    "slower": 0
+  },
+  "generated_pair_changes": {
+    "faster": 60,
+    "unchanged": 0,
+    "slower": 0
+  },
+  "large_mac_seconds": {
+    "straight": 1.04,
+    "loops": 2.61
+  },
+  "large_linux_arm_seconds": {
+    "straight": 3.08,
+    "loops": 10.39
+  },
+  "practice_optimizer_slowest_seconds": 0.61,
+  "practice_suite_wall_seconds": 24.3,
+  "practice_optimizer_slowest_seconds_heavy_load": 4.53
+}

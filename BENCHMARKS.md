@@ -1,3 +1,100 @@
+# optimizer-apex validation
+
+Isolated branch based on `optimizer-forge` (`dac7d75`). Integrates large-function
+allocation/analysis improvements from this repository's `optimizer-final`
+(`65e03e0`), while keeping the existing small-function allocation order. Adds
+backward bit-demand projection and packed finite lookup alternatives. Main and
+the other worktrees were not edited.
+
+Practice sample and held-out cycle totals remain **identical** to forge on all
+500 program/machine pairs. The four generated-machine sweep (seed 1813) also
+passes all 400 paired checks with identical sample/random cycle counts. This
+round's new code-quality evidence is on independently generated recurrences;
+it does not claim another gain on the practice suite or a known hidden score.
+
+The final lower-load practice run passed all 500 pairs with 100 generated
+validation inputs each and byte-for-byte determinism. Its slowest optimizer
+invocation was 0.61 seconds using four workers (24.3 seconds for the suite).
+An earlier run under simultaneous compilation/fuzz/mutation/sweep load reached
+4.53 seconds; both runs respected the five-second test timeout. Decisions use
+structural budgets, never elapsed time.
+
+Compiler throughput on generated 100k inputs:
+
+| Platform / load | Straight seconds | Loop seconds | Peak RSS straight / loop |
+|---|---:|---:|---:|
+| Mac, lighter load | 1.04 | 2.61 | 140 / 320 MiB |
+| Linux ARM VM, concurrent validation | 3.08 | 10.39 | 119 / 176 MiB |
+
+The older forge run recorded 3.66 / 13.11 seconds on the Linux VM under its
+concurrent validation. Loads differ; these are observations, not controlled
+speedup ratios or judge-x86 time guarantees. Both large Mac outputs passed 16
+complete official observable-state checks. Default cycles: straight 170,026,
+loop 376,625, versus original 686,591 / 558,161. Lazy coalescing is used only
+above 4,096 SSA values; the small allocator's tie order is preserved.
+
+New finite proof and representations:
+
+- Fresh SSA dependence analysis roots every returned bit, complete branch
+  operand and division/remainder divisor. Phi demands are unioned to a fixed
+  point. Logical shifts, literal masks, bitwise operations and low-bit arithmetic
+  propagate only necessary bits; conservative transfers retain more bits when
+  uncertain. Exact constant evaluation exposes const/mov aliases without cached
+  intervals. At most six retained input bits are allowed.
+- Projected equivalence alone does not prove termination. The original program
+  still must return for every retained-bit assignment, under the existing 20k
+  per-case / one-million-total step limits. Any trap/timeout rejects.
+- Original decision graphs remain available. A second candidate packs unsigned
+  offsets into power-of-two fields and selects/extracts a constant word. At most
+  16 words; high/sign/sparse bits and parameter identity are preserved. Width 32
+  bypasses field shifts/masks. Both encodings share one proof/evaluation in the
+  optimizer; standalone APIs remain independently testable.
+
+Generated recurrence experiment (`tools/finite_sweep.py`): input values are
+unmasked through wrapping arithmetic and masked only at the return. The earlier
+literal-AND-use proof rejected these programs. All 60 paired generated checks
+improve, with no ties or regressions; each version passes sample +100 generated
+validation inputs and repeat-output checks. Additional random scoring skips the
+fixed edge prefix.
+
+| Machine | Sample cycles forge | Apex | Random forge | Apex |
+|---|---:|---:|---:|---:|
+| default | 774 | 124 | 6,192 | 1,006 |
+| few_registers | 774 | 124 | 6,192 | 1,006 |
+| no_fused | 1,006 | 142 | 8,048 | 1,074 |
+| slow_memory | 1,074 | 124 | 8,592 | 1,006 |
+| wide_fast | 624 | 146 | 4,992 | 1,182 |
+
+Examples on the default machine: generated case 9 falls 82 to 7 cycles; case 11
+falls 92 to 27. These synthetic cases establish coverage and performance on a
+new program family, not performance on hidden contest inputs. Reproduce:
+`python3 tools/finite_sweep.py --baseline /absolute/path/to/kopt-forge/kopt
+--save /tmp/generated.json` (join the command on one line).
+
+Direct frozen-source checks:
+
+- 10,800 official input/projection comparisons across 43 bit-transfer, alias,
+  branch, phi, loop, trapping-divisor and zero-initialized-register cases.
+- 5,566 existing finite-pass comparisons, including stale-range poisoning,
+  projected traps/timeouts and instruction/evaluation-budget caps.
+- 19,422 BDD/packed comparisons, covering 1/2/4/8/16/32-bit fields, unsigned bases,
+  wrap-boundary outputs, sparse/sign bits, multiple parameters, SSA, aliasing,
+  deterministic output and rejection gates. Some packed alternatives are slower;
+  exact candidate measurement is required.
+- 2,500 stronger fuzz programs seed 1811, 1,000 metamorphic programs seed 1812,
+  300 ASan/UBSan fuzz programs seed 1814, 35 regressions, 50 smoke pairs plus
+  four negative controls, and dense-pressure sizes 900/2,000/15,000 passed.
+- Strict Linux C++17 compilation passed with `-Wall -Wextra -Werror -pedantic`.
+  Bit-demand proof gates also have a kit-free Ubuntu/g++11 CI mode.
+
+Source hashes, per-pair metrics and generated-machine descriptions are retained
+under `results/`. No external optimizer code, runtime framework, solver,
+benchmark fingerprint, cached corpus answer or network use was introduced.
+
+Historical forge/frontier/next evidence follows.
+
+---
+
 # optimizer-forge validation
 
 Isolated branch `optimizer-forge`, based on `optimizer-frontier` at `f6088bb`.

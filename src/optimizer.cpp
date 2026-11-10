@@ -931,10 +931,11 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : sunk) cands.push_back(std::move(c));
     }
-    if (progSize <= 1000 && !dense && passEnabled("finite")) {
-        Cand c;
-        if (finiteFunction(base, m, c.p)) {
-            c.what = "finite"; quick(c);
+    if (progSize <= 1000 && !dense) {
+        auto programs = finiteAlternatives(base, passEnabled("finite"), passEnabled("packed"));
+        for (size_t i = 0; i < programs.size(); i++) {
+            Cand c; c.p = std::move(programs[i]);
+            c.what = "finite-table" + std::to_string(i); quick(c);
             cands.push_back(std::move(c));
         }
     }

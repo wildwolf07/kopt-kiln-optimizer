@@ -65,3 +65,34 @@ An early alternative coloring-order experiment was rejected. It recovered an
 older spill_storm result but changed later search seeds and regressed several
 other programs. That experiment is absent from production. The retained new
 stages append candidates after earlier searches to preserve their paths.
+
+The next finite-domain proof works backwards from observable result bits,
+complete branch operands and division/remainder divisors. For addition,
+subtraction and multiplication, a demanded output bit can depend on lower
+input bits, so the transfer fills every bit through the highest demand.
+Logical shifts map demands by their constant amount; variable shifts retain
+the entire source and the count's low five bits. Phi demands are unioned to a
+fixed point. These rules use KIR's wrapping arithmetic and shift semantics;
+no cached range facts or optimizer cleanup are required. A bounded exact
+constant pass handles masks introduced by const/mov without interval reasoning.
+
+Related context: Stephenson, Babb and Amarasinghe,
+[Bitwidth Analysis with Application to Silicon Compilation](https://dspace.mit.edu/entities/publication/0c6567bf-0998-454f-8579-54fb30c83954),
+and Budiu and Goldstein,
+[BitValue Inference](https://www.cs.cmu.edu/~seth/papers/budiu-tr00.html).
+Our goal is a finite input-equivalence proof, rather than reducing machine
+operand widths. The projected domain is still exhaustively interpreted.
+
+A second representation packs finite results into constant words. The field
+width is a power of two and a shifted mask extracts an entry; a small decision
+graph selects words when needed. All constants are constructed from this run's
+exhaustive table. Lookup metadata is never a program fingerprint or an external
+answer store. The original decision representation remains available.
+
+Large-program allocation integrates the independently developed changes from
+this repository's `optimizer-final` snapshot `65e03e0`: lazy class-level
+coalescing, compact K-allocator live lists, and block-local definition refresh.
+An initial global lazy-coalescing experiment changed small-case search paths;
+restricting it to more than 4,096 values preserves all practice cycle counts.
+The separate deterministic compile-work budget was not imported, to keep the
+existing search coverage while measuring these changes in isolation.

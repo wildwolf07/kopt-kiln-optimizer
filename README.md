@@ -26,9 +26,12 @@ counting selects, load phis, store selects, return-block copying and
 profile-guided timing inputs. The `optimizer-frontier` branch combines
 `optimizer-next` at `8a818d6` with spill-slot sharing and larger-program
 allocation from `58b5077`, pressure-aware scheduling, pure-region tree ordering,
-and bounded rematerialization. This `optimizer-forge` branch builds on `f6088bb` with backward scheduling,
+and bounded rematerialization. The `optimizer-forge` branch builds on `f6088bb` with backward scheduling,
 pure instruction sinking, source-derived finite-domain specialization, and a
-range-cache lifetime fix. Other active worktrees are not modified.
+range-cache lifetime fix. This `optimizer-apex` branch builds on `dac7d75`: large-function lazy
+coalescing and local analysis refresh reduce compile work; backward bit-demand
+proofs and packed lookup alternatives cover additional finite computations.
+Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
@@ -119,3 +122,9 @@ depends on at most six input bits, exhaustively evaluates that complete domain,
 and emits a reduced decision graph. It derives every table from the supplied
 program at runtime; it has no stored program answers. [RESEARCH.md](RESEARCH.md)
 records the references, independent adaptations and rejected experiments.
+
+The practice-suite cycle totals remain identical to forge. Improvements this
+round concern compiler throughput and generated recurrences whose relevant
+input bits become visible only through final masks. `tools/finite_sweep.py`
+reproduces the complete-optimizer comparison. The lookup values always come
+from exhaustive evaluation of the program supplied on the command line.

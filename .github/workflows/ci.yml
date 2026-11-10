@@ -24,5 +24,9 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/range_cache.py --kit-free
+      - name: Check bit-demand projection proof gates
+        env:
+          CXX: g++-11
+        run: python3 tests/finite_domain.py --kit-free
       - name: Check dense-live-set limits with an independent arithmetic oracle
         run: python3 tests/pressure.py
