@@ -30,11 +30,11 @@ and bounded rematerialization. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 10,102 | 10.26x |
-| few_registers | 202,164 | 25,592 | 15,706 | 12.87x |
-| no_fused | 107,966 | 20,218 | 13,050 | 8.27x |
-| slow_memory | 111,254 | 24,319 | 14,822 | 7.51x |
-| wide_fast | 55,744 | 12,923 | 7,766 | 7.18x |
+| default | 103,671 | 16,527 | 10,088 | 10.28x |
+| few_registers | 202,164 | 25,592 | 15,820 | 12.78x |
+| no_fused | 107,966 | 20,218 | 12,962 | 8.33x |
+| slow_memory | 111,254 | 24,319 | 14,728 | 7.55x |
+| wide_fast | 55,744 | 12,923 | 7,645 | 7.29x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
