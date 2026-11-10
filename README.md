@@ -33,14 +33,15 @@ coalescing and local analysis refresh reduce compile work; backward bit-demand
 proofs and packed lookup alternatives cover additional finite computations.
 The vector stage adds exact bit-affine synthesis and final
 layout polishing. This `optimizer-resolve` branch starts from integrated main
-`daac25e` and adds bounded seven-to-ten-bit finite specialization. Other active worktrees are not modified.
+`daac25e` and adds bounded seven-to-ten-bit finite specialization and
+constant-address load rematerialization. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
 | default | 103,671 | 16,527 | 9,431 | 10.99x |
 | few_registers | 202,164 | 25,592 | 14,298 | 14.14x |
 | no_fused | 107,966 | 20,218 | 11,407 | 9.46x |
-| slow_memory | 111,254 | 24,319 | 13,648 | 8.15x |
+| slow_memory | 111,254 | 24,319 | 13,616 | 8.17x |
 | wide_fast | 55,744 | 12,923 | 7,062 | 7.89x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
@@ -55,6 +56,7 @@ Kit-free checks, also available on Ubuntu 22.04/g++ 11 CI:
 python3 tools/smoke.py
 python3 tests/pressure.py
 python3 tests/wide_finite.py --kit-free
+python3 tests/load_rematerialize.py --kit-free
 ```
 
 The smoke suite covers arithmetic, loops, guarded division, memory, scratch,
@@ -138,3 +140,10 @@ not guess linearity from sample executions. Unsupported or nonlinear expressions
 retain earlier candidates. `tools/affine_sweep.py` checks complete optimizers on
 independently generated CRC-style and XOR/shift kernels; `tests/bit_affine.py`
 validates the pass directly against the official interpreter.
+
+The final load-rematerialization candidate shortens long loaded-value lifetimes
+by repeating a valid ordinary constant-address load near separated user groups.
+Per-address write versions and effect barriers prove that each repeated load
+reads the same value. Unknown aliases, volatile operations, possible traps, phi
+users and cross-block users reject the recipe. Exact cycle measurements include
+the additional load/cache costs.

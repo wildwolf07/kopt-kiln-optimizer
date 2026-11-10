@@ -36,5 +36,9 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/bit_affine.py --kit-free
+      - name: Check constant-load splitting safety gates
+        env:
+          CXX: g++-11
+        run: python3 tests/load_rematerialize.py --kit-free
       - name: Check dense-live-set limits with an independent arithmetic oracle
         run: python3 tests/pressure.py

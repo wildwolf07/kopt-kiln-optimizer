@@ -9,17 +9,21 @@ score prediction. Only this branch/worktree was changed.
 | default | 9,758 | 9,431 | 56,563 | 54,780 |
 | few_registers | 14,999 | 14,298 | 88,303 | 84,599 |
 | no_fused | 12,186 | 11,407 | 70,413 | 66,273 |
-| slow_memory | 13,977 | 13,648 | 83,760 | 81,983 |
+| slow_memory | 13,977 | 13,616 | 83,760 | 81,727 |
 | wide_fast | 7,270 | 7,062 | 41,700 | 40,471 |
 
 Each version passed 500 program/machine checks, sample plus 100 additional
 inputs, with repeat-output determinism. Random scoring uses eight inputs after
-offset 40, skipping the generator's fixed edge prefix. Five sample pairs improve
-and 495 tie; none regress. The improvement is the eight-bit pure divisor-count
+offset 40, skipping the generator's fixed edge prefix. Six sample pairs improve
+and 494 tie; none regress. The main improvement is the eight-bit pure divisor-count
 loop, which changes from 249–810 to 31–41 cycles depending on the machine.
+Constant-load rematerialization also improves the slow-memory matrix multiply
+from 662 to 630 sample cycles and 5,296 to 5,040 randomized cycles. Its separate
+direct driver passed 31,360 official comparisons across 35 alias/trap/volatile,
+address-boundary, clone-budget and SSA fixtures, under four backend modes.
 
-Independently generated seven-to-ten-bit nonlinear recurrences cover all five
-machines, using seed 2115. Forty-four of 60 sample pairs improve, 15 tie and one
+The wide-only snapshot `f8bdb93` was also checked on independently generated
+seven-to-ten-bit nonlinear recurrences across all five machines, using seed 2115. Forty-four of 60 sample pairs improve, 15 tie and one
 regresses (wide-fast case 2: 40 → 48); its held-out total improves 320 → 172.
 Aggregate held-out cycles improve on every machine:
 
@@ -42,12 +46,30 @@ python3 tools/finite_sweep.py --baseline /path/to/main/kopt --candidate ./kopt \
 The default finite-sweep mode still generates the historical one-to-six-bit
 recurrences. Every table is derived from the supplied source at compile time.
 
-Four independently generated machines (seed 2113) passed all 400 paired
-program/machine checks, with 100 additional inputs and repeat-output checks.
-Their full per-case results and descriptions are in
-`results/resolve-machine-sweep.json`.
+The wide-only snapshot passed 400 paired checks on generated machines (seed
+2113), recorded in `results/resolve-wide-machine-sweep.json`. The combined
+optimizer passed 400 unique pairs on four further machines (seed 2124), with
+100 additional inputs and repeat-output checks. One baseline-only timeout in
+the initial parallel run was retried at the unchanged five-second limit with
+one worker; all four hardware variants of that program passed. Initial failure
+and retry records are retained in `results/resolve-machine-sweep.json` and
+`results/resolve-machine-retry.json`. Aggregate randomized cycles improve on
+all four machines.
 
-Frozen-source validation:
+Combined frozen-source validation:
+
+- 500 public pairs, 2,000 strict-mode fuzz programs (seed 2121), 1,000
+  metamorphic programs (seed 2122), 300 ASan/UBSan fuzz programs (seed 2123),
+  all 42 regressions and 50 smoke pairs plus four negative controls passed.
+- The load pass passed 31,360 direct official comparisons and independent
+  semantic review. Kit-free mode checks all 35 fixtures under four backend
+  modes, including clone counts, SSA, repeat determinism and 4,480 local
+  interpreter comparisons; those 4,480 checks also passed under ASan/UBSan.
+- The combined Linux C++17 build passed strict warnings and 3,060 official
+  comparisons of both targeted kernels across all five machines. They compiled
+  in 0.17–0.81 s during concurrent testing.
+
+Earlier wide-only snapshot `f8bdb93` validation:
 
 - 2,500 strict-mode fuzz programs (seed 2111), 1,000 metamorphic programs
   (seed 2112) and all 42 saved regressions passed.

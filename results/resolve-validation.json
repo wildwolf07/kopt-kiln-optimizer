@@ -1,6 +1,7 @@
 {
   "branch": "optimizer-resolve",
   "baseline": "daac25e",
+  "prior_snapshot": "f8bdb93",
   "production_sha256": {
     "src/arithmetic.cpp": "2c44a2da7a0565afa6d69a75f95e573c4d945b3097b219b5f4d74378ec77a2b9",
     "src/backend.cpp": "489853b2c84c05bd87efcc623b597ddc2033d127fe31c64165cee97a78dd1537",
@@ -14,13 +15,14 @@
     "src/ir.h": "772ae5146c00d232a7e95de84c441c9457cfd436f3a268ba0d61fb569caaa45c",
     "src/kir.cpp": "14ef22c98672d014106d1be59f3011ed9a1885153066b4bdca42213870d6b993",
     "src/kir.h": "3c2fd990347f960a90f155ea9c1c73e77b6884cbc47efdb1bda9121103d411b4",
+    "src/load_rematerialize.cpp": "edee55f7932a0c804a448dacb2c38d8de7000952fe045aa1f486ee061cd842bb",
     "src/loops.cpp": "725f5cf2243bd52268b6b5ff4d35a35b3a5b279b4578ced42e542d1f8f7887e6",
     "src/loops.h": "b6d2c29a73c5628f3c0671ef0e8a77e62a49179a06852b4f86cb1d749fc28477",
     "src/main.cpp": "53113b5f292681cb8bb3d85b31024bfe774af8bbbde6eb9828c378b2b0f59420",
-    "src/optimizer.cpp": "f50cb145d5e8510c5f84724f5236abebc87ae73db215c6060be9fd5d02245bd7",
+    "src/optimizer.cpp": "79908798a007d70d7219afde21e02ddc591fd79df8edd5e9106c2db57fcc7a2e",
     "src/optimizer.h": "43401220569148f986fc38e6f86e1089961ee5c6320a6a240c6a01c1277be7a2",
     "src/passes.cpp": "4028e029627c1fddf5cbdd8d23bc7626eefe18f57fbf24034d6880df216bd169",
-    "src/passes.h": "7f411bf271ac1a41ca6c7c363ab00288067f552eaf5be7942a1a7c7be822cb2f",
+    "src/passes.h": "4bd0bb0d274c90a4ffa1234957b6e125f5c9304966e67fd7702d8efe1a5c34b0",
     "src/pow2.cpp": "fd4e0893be0b7bceeefa88e00b6babb075008305cc9199e17d8b2122f55bfeb4",
     "src/rematerialize.cpp": "1f441899c68d2749ea6e693f2b5b8628bbfa0ff6f844bb21ac230b674c4b694f",
     "src/sim.cpp": "131a4f11fa7423c695ae5c67732631e2a93146ab0cff905b1d8ba5f84ed53b9c",
@@ -29,76 +31,105 @@
     "src/ssa.cpp": "002591fde933d6edec44867428fbb2d976c78dfd14b039c108df127f7612880f",
     "src/tree_schedule.cpp": "13898f432eae9a679798b78456ea7c41166d56c1e12c6b1c58dc876e700330f2"
   },
-  "binary_sha256": "add541a807f38846dc3a3f57539e060e60001ed25fa9ddf2feaa61a3480ada6d",
+  "binary_sha256": "13509a53b4a4435337015594817b8659c1d5b76e9a72077d8980810cef51f779",
   "checks": {
-    "benchmark_pairs": 500,
-    "benchmark_additional_inputs_per_pair": 100,
-    "benchmark_score_offset": 40,
-    "benchmark_seed": 12345,
+    "benchmark": {
+      "pairs": 500,
+      "additional_inputs": 100,
+      "seed": 12345,
+      "score_offset": 40,
+      "sample_faster": 6,
+      "sample_ties": 494,
+      "sample_regressions": 0
+    },
     "fuzz": {
-      "count": 2500,
-      "seed": 2111,
+      "count": 2000,
+      "seed": 2121,
       "failures": 0
     },
     "metamorphic": {
       "count": 1000,
-      "seed": 2112,
+      "seed": 2122,
+      "failures": 0
+    },
+    "sanitizer_fuzz": {
+      "count": 300,
+      "seed": 2123,
       "failures": 0
     },
     "regressions": 42,
-    "sanitizer_fuzz": {
-      "count": 300,
-      "seed": 2114,
-      "failures": 0
-    },
-    "generated_recurrence_pairs": 60,
-    "generated_recurrence_seed": 2115,
-    "generated_machine_pairs": 400,
-    "generated_machine_seed": 2113,
-    "direct_official": 41792,
-    "direct_kit_free": 38912,
-    "direct_kit_free_asan_ubsan": 38912,
-    "linux_output_official": 2560,
     "smoke_pairs": 50,
     "negative_controls": 4,
-    "legacy_bit_demand_gates": 43,
-    "dense_pressure_values": [
-      900,
-      2000,
-      15000
-    ],
-    "strict_linux_cpp17_build": true
+    "load_direct_official": 31360,
+    "load_kit_free_asan_ubsan_local": 4480,
+    "load_kit_free_fixtures": 35,
+    "load_kit_free_modes": 4,
+    "generated_machines": {
+      "seed": 2124,
+      "unique_pairs_passed": 400,
+      "initial_passes": 399,
+      "initial_baseline_timeouts": 1,
+      "single_worker_retry_passes": 4,
+      "limit_seconds": 5
+    },
+    "linux_strict_cpp17": true,
+    "linux_official_comparisons": 3060,
+    "wide_only_checks": "results/resolve-wide-validation.json",
+    "wide_production_unchanged": [
+      "src/finite.cpp",
+      "src/finite_domain.cpp"
+    ]
   },
   "linux_compile_seconds": [
     {
+      "program": "count_divisors",
       "machine": "default",
-      "seconds": 0.5467776670120656
+      "seconds": 0.5399626310099848
     },
     {
+      "program": "count_divisors",
       "machine": "few_registers",
-      "seconds": 0.45374037997680716
+      "seconds": 0.4940038440108765
     },
     {
+      "program": "count_divisors",
       "machine": "no_fused",
-      "seconds": 0.4650687309913337
+      "seconds": 0.4064652110100724
     },
     {
+      "program": "count_divisors",
       "machine": "slow_memory",
-      "seconds": 0.774495923978975
+      "seconds": 0.801051356975222
     },
     {
+      "program": "count_divisors",
       "machine": "wide_fast",
-      "seconds": 0.6631412879796699
-    }
-  ],
-  "linux_100k": {
-    "straight": {
-      "seconds": 2.5,
-      "maxrss_kib": 118876
+      "seconds": 0.6279915170161985
     },
-    "loops": {
-      "seconds": 8.26,
-      "maxrss_kib": 190424
+    {
+      "program": "matmul4",
+      "machine": "default",
+      "seconds": 0.2707785700040404
+    },
+    {
+      "program": "matmul4",
+      "machine": "few_registers",
+      "seconds": 0.1995343979797326
+    },
+    {
+      "program": "matmul4",
+      "machine": "no_fused",
+      "seconds": 0.1744393059925642
+    },
+    {
+      "program": "matmul4",
+      "machine": "slow_memory",
+      "seconds": 0.512120106985094
+    },
+    {
+      "program": "matmul4",
+      "machine": "wide_fast",
+      "seconds": 0.2707167769840453
     }
-  }
+  ]
 }

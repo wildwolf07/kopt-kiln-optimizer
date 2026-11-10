@@ -15,6 +15,10 @@ tradeoff, see Shobaki, Shawabkeh and Abu Rmaileh,
 Tree ordering also uses the register-need idea described by Appel and Supowit,
 [Generalizations of the Sethi-Ullman algorithm for register allocation](https://collaborate.princeton.edu/en/publications/generalizations-of-the-sethiullman-algorithm-for-register-allocat/).
 Our shared-DAG ordering is a heuristic; it does not claim the optimality of a tree algorithm.
+Loaded-value splitting uses the recomputation tradeoff described by Briggs,
+Cooper and Torczon, [Rematerialization](https://doi.org/10.1145/143095.143143).
+LLVM's public [instruction-movement predicates](https://llvm.org/doxygen/MachineInstr_8cpp_source.html)
+were consulted for context only; the Kiln address/version/barrier proof is independent.
 The interpreter, timing model and fixed-seed generators are ports of the kit,
 as permitted. No optimizer framework, solver, or external optimizer code is
 used. Additional research and experiment notes are in [RESEARCH.md](RESEARCH.md).
@@ -98,6 +102,8 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    independently proven bit-affine rewrite with raw and two backend lowerings.
    A separate final stage then offers seven-to-ten-bit finite domains, sharing one
    exhaustive evaluation across forward/reverse decision and packed representations.
+   Finally, offer constant-address load splitting on at most three winning seeds,
+   with four lowerings under a separate 2,000-instruction work budget.
    Measure alternatives with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
@@ -165,6 +171,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Backward scheduling | Build a reverse topological order from sink instructions, estimate backwards liveness from exact liveOut/window boundaries, and balance reverse issue time against excess live values weighted by the machine's spill penalty. Try compact/spread colors with and without scratch allocation. With fixed window w=96, dependency construction is O(n·w) and ready-set scoring is O(n·w²) worst case. | Uses the identical RAW/WAR/WAW, memory, trap and effect graph as forward scheduling. Emits every instruction once and retains the terminator. Priorities never remove a dependence; reverse issue times are heuristics, not inserted delays. |
 | Pure-region tree ordering | Order dependencies by estimated register need, then emit iterative postorder inside contiguous pure SSA regions; O(n), at most three operands per instruction. Used as an extra large-program or late-search candidate. | Emit every original instruction once, after its operands; never cross memory, division, volatile operations or control flow. No algebraic rewrites or recursion. Shared DAG estimates are heuristic. |
 | Pure instruction sinking | Move single-user nontrapping pure instructions just before their user, possibly into a dominated block. Pin phi users; forbid loop-depth increases, movement into another loop and cross-block irreducible moves. Iterative dependency-forest rewrite; value scans O(n), CFG analyses bounded to 256 blocks, 100k instructions and 300k values. | Operands must dominate the destination. Single-user chains move together without cloning; pure operations may cross effects because they cannot affect them or trap. Moves never increase loop nesting. |
+| Constant-load rematerialization | On fresh SSA, record ordinary loads at valid constant words, then scan per-word store versions and effect barriers. Require all 2–8 user sites in the defining block, no phi users, and unchanged address versions/barriers through every use. Split groups separated by more than 16 original instructions, up to 64 clones. O(values + instructions + uses + 4096 × blocks), capped at 256 blocks, 20k values and 4,096 instructions. The final hook considers seeds through 500 instructions and four lowerings under 2,000 work units. | Clones execute later in the same block. Valid constant loads cannot trap; disjoint constant stores preserve their value. Unknown/invalid memory, volatile operations, explicit traps and potentially trapping div/mod block the recipe. Operand reads precede the consuming instruction's own effect. No GVN follows to recreate long live ranges. Earlier candidates remain available. |
 | Rematerialization | Offer at most 64 copies of cheap one-instruction parameter/constant recipes with 2–8 separated instruction users; O(n) scanning and fixed-budget cloning. No phi users; no GVN afterward. | Immutable leaves dominate every use. No effects/traps. Each parameter already has an independent use at/after the clone in its block, excluding all recipe definitions, so moving recipes does not invalidate the lifetime guard. |
 | Rotation/unroll/peel/thread | Duplicate/register-form blocks and redirect edges; O(n·U) within code-growth budgets. | Each new path executes the same original instructions, except tests established redundant. |
 | Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |

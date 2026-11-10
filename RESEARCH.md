@@ -129,8 +129,11 @@ six-bit stage and all earlier candidate trajectories remain unchanged.
 
 A separate full-corpus cost breakdown on integrated main identified matrix
 multiplication's long-lived loaded values and sieve's branch fences as remaining
-weak areas. Constant-address load rematerialization is being investigated
-separately; the resolve finite-domain change does not alter memory scheduling.
+weak areas. Constant-address load rematerialization is offered in a separate final stage.
+It tracks constant-address store versions and effect barriers over each complete
+definition-to-use interval, and rejects phi/cross-block users. A four-lowering
+alternative has its own 2,000-instruction work budget. The finite-domain change
+does not alter memory scheduling.
 
 For the remaining loaded-value pressure, Briggs, Cooper and Torczon,
 [Rematerialization (PLDI 1992)](https://doi.org/10.1145/143095.143143),

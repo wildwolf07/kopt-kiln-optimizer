@@ -257,7 +257,7 @@
 "matmul4|default": 316,
 "matmul4|few_registers": 595,
 "matmul4|no_fused": 426,
-"matmul4|slow_memory": 662,
+"matmul4|slow_memory": 630,
 "matmul4|wide_fast": 211,
 "matrix_add4|default": 52,
 "matrix_add4|few_registers": 59,

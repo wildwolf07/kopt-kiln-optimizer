@@ -994,6 +994,34 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             quick(c); cands.push_back(std::move(c));
         }
     }
+    // Final-only load splitting; preserve every earlier candidate and seed set.
+    if (effort == 2 && passEnabled("loadremat")) {
+        const auto seeds = bestDistinct(cands, 3);
+        std::vector<Cand> split;
+        size_t work = 0;
+        for (const Cand *seed : seeds) {
+            if (seed->p.instrCount() > 500 || work + 4 * seed->p.instrCount() > 2000) continue;
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            if (!rematerializeLoads(f)) continue;
+            size_t size = 0;
+            for (const BB &b : f.bb) if (b.alive) size += b.insts.size();
+            if (size > 500 || work + 4 * size > 2000) continue;
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; mode++) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f; BackendOptions bo;
+                bo.preSchedule = mode != 0; bo.bottomUpSchedule = mode >= 2;
+                bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + "/loadremat" + std::to_string(mode); c.flags = seed->flags;
+                quick(c); split.push_back(std::move(c));
+                work += size;
+            }
+        }
+        for (Cand &c : split) cands.push_back(std::move(c));
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";
