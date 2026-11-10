@@ -85,8 +85,11 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
 6. For full-effort programs: a flatten chain (split irreducible cycles, peel by
    16, thread, recompile; up to four steps on the best three distinct programs,
    under a deterministic budget of compiled instructions); a load-phi stage
-   recompiling the best five distinct programs (at most 8,000 instructions; ) with load phis and return-block copies, with and without store selects; then pressure-aware scheduling, bounded
+   recompiling the best five distinct programs (at most 8,000 instructions) with load phis and return-block copies, with and without store selects; then pressure-aware scheduling, bounded
    rematerialization, pure-region tree ordering and arithmetic alternatives.
+   Then, after those seed-sensitive stages, speculation recompiles of the best
+   programs under their own 8,000-instruction budget: full speculation, and a
+   loads-only mode with pipelined header loads.
    Finally try chain/hot-block layouts and exact block/suffix sharing from up to eight good candidates.
    A final backward-scheduling stage offers four lowering alternatives for each
    of the best four distinct programs, retaining all earlier candidates. A final
