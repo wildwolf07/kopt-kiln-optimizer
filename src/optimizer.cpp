@@ -131,6 +131,7 @@ void runPipeline(Func &f, const Machine &m, int level, const Flags &fl) {
         if (level >= 2 && fl.loadPhis && passEnabled("loadphis")) c |= TIMED("loadPhis", loadPhis(f));
         if (level >= 2 && fl.loadPhis && passEnabled("aliasfwd")) c |= TIMED("aliasForward", aliasForward(f));
         if (level >= 2 && fl.storeSel && passEnabled("storeselect")) c |= TIMED("storeSelect", storeSelect(f));
+        if (level >= 2 && fl.storeSel && passEnabled("armstores")) c |= TIMED("armStores", mergeArmStores(f));
         c |= TIMED("instSimplify", instSimplify(f));
         c |= TIMED("dce", dce(f));
         c |= TIMED("deadStores", deadStores(f));

@@ -1959,6 +1959,74 @@ bool loadPhis(Func &f) {
     }
     return changed;
 }
+// Diamonds whose two arms each end with a store to the same word:
+//   A: br c, T, E    T: pure work; store a, x; jmp J    E: pure work; store a', y; jmp J
+// with a and a' the same address. The word is written on both paths, so one
+// store of select(c, x, y) in A writes exactly what either arm would; the arms'
+// pure, non-trapping work moves into A (it only feeds the store or J's phis).
+// No new trap is possible: the address was accessed on every path.
+bool mergeArmStores(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    std::vector<DefSite> ds = defSites(f);
+    auto sameAddr = [&](Opnd a, Opnd b) {
+        a = f.resolve(a); b = f.resolve(b);
+        if (a == b) return true;
+        AddrForm x = addrForm(f, ds, a), y = addrForm(f, ds, b);
+        return x.hasBase == y.hasBase && (!x.hasBase || x.base == y.base) && x.off == y.off;
+    };
+    bool changed = false;
+    for (int a = 0; a < static_cast<int>(f.bb.size()); a++) {
+        BB &A = f.bb[a];
+        if (!A.alive || A.term().op != OP_BR || A.term().a[0].isConst) continue;
+        const int t = A.term().tgt[0], e = A.term().tgt[1];
+        if (t == e || t == a || e == a || t == 0 || e == 0) continue;
+        auto arm = [&](int s, int &join, int &storeAt) {
+            const BB &S = f.bb[s];
+            if (!S.alive || S.preds.size() != 1 || !S.phis.empty() || S.term().op != OP_JMP) return false;
+            join = S.term().tgt[0];
+            storeAt = -1;
+            for (size_t i = 0; i + 1 < S.insts.size(); i++) {
+                const Inst &x = S.insts[i];
+                if (x.op == OP_STORE) { if (storeAt >= 0) return false; storeAt = static_cast<int>(i); continue; }
+                if (!isPure(x.op) || x.dst < 0) return false;
+            }
+            // The store must be the arm's last instruction before the jump.
+            return storeAt >= 0 && storeAt + 2 == static_cast<int>(S.insts.size());
+        };
+        int jt, je, st, se;
+        if (!arm(t, jt, st) || !arm(e, je, se) || jt != je || jt == a || jt == t || jt == e) continue;
+        const Inst sT = f.bb[t].insts[static_cast<size_t>(st)], sE = f.bb[e].insts[static_cast<size_t>(se)];
+        if (!sameAddr(sT.a[0], sE.a[0])) continue;
+        const Opnd c = f.resolve(A.term().a[0]);
+        std::vector<Inst> moved;
+        for (int s : {t, e})
+            for (size_t i = 0; i + 1 < f.bb[s].insts.size(); i++) {
+                const Inst &x = f.bb[s].insts[i];
+                if (x.op == OP_STORE) continue;
+                forgetRange(x.dst);
+                moved.push_back(x);
+            }
+        Inst sel;
+        sel.op = OP_SELECT; sel.dst = f.newVal(); sel.n = 3;
+        sel.a[0] = c; sel.a[1] = f.resolve(sT.a[1]); sel.a[2] = f.resolve(sE.a[1]);
+        Inst st2 = sT;
+        st2.a[1] = Opnd::val(sel.dst);
+        moved.push_back(sel);
+        moved.push_back(st2);
+        for (int s : {t, e}) {
+            Inst j = f.bb[s].term();
+            f.bb[s].insts.clear();
+            f.bb[s].insts.push_back(j);
+        }
+        auto &ai = f.bb[a].insts;
+        ai.insert(ai.end() - 1, moved.begin(), moved.end());
+        ds = defSites(f);
+        changed = true;
+    }
+    return changed;
+}
+
 
 // Conditional stores whose old values are known: in a triangle
 //   P: ... br c, T, J      T: pure work; store a1, x1; ...; jmp J

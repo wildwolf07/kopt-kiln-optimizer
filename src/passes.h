@@ -47,6 +47,7 @@ bool instSimplify(Func &f);        // algebraic simplification + copy propagatio
 bool gvn(Func &f);                 // dominator-scoped value numbering incl. loads and store forwarding
 bool loadPhis(Func &f);           // loads at merges whose value every predecessor knows -> phi
 bool storeSelect(Func &f);         // conditional stores with known old values -> select + store
+bool mergeArmStores(Func &f);       // both arms store the same word -> one store of a select
 bool dupConstReturns(Func &f, int maxSize, int maxNew);   // per-edge copies of return blocks fed constants
 bool aliasForward(Func &f);        // load after may-alias stores -> select on address equality
 bool closedFormLoops(Func &f);     // counted summation loops -> exit values in closed form
