@@ -24,6 +24,7 @@ the wall clock.
 ## 1. What is implemented
 
 Analyses: dominators/frontiers, natural loops and irreducible regions,
+exact bit-affine symbolic forms,
 path-based liveness, recurrence SCCs, induction ranges, signed value-range
 propagation with branch refinement, and bounded trip-count reasoning.
 
@@ -93,6 +94,8 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    For input programs through 1,000 instructions and within the normal CFG/register
    bounds, offer source-derived finite-domain decision and packed-lookup alternatives when proven.
    Their projection proof and exhaustive evaluation are shared within one call.
+   Offer up to six final trace layouts on the best three candidates, then an
+   independently proven bit-affine rewrite with raw and two backend lowerings.
    Measure alternatives with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
@@ -116,6 +119,8 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | SSA | Dominators/frontiers, live phi placement and renaming; depends on CFG/frontiers and inserted phis. | Preserve def-use relations and incoming edges; undefined reads are zero. |
 | IV ranges | Recognize bounded positive-step recurrences; loop/phi analysis. | Continuing paths must pass the bound test without wrap. For a post-increment test, **init+step must also stay below 2^31**. |
 | Signed VRP | Monotone interval growth, widening to program thresholds, capped iteration and narrowing. At most 100 solving rounds; at most 192 thresholds. | Arithmetic that may wrap returns a conservative full interval. Only settled solutions are used. Branch facts apply on guarded paths/phi edges. |
+| Bit-affine synthesis | For pure input through 1,000 instructions/128 blocks/four parameters, bounded if-conversion and cleanup must leave one RET block without phis (at most 4,000 SSA values). Interpret each bit symbolically as an affine GF(2) form with 128 input coefficients and a separate constant. Emit bias XOR selected matrix columns; one-bit columns with common displacement share masked shifts. At most 32 nonzero columns. | XOR is exact. AND/OR are accepted only for constant, equal or complementary forms; nonlinear products reject. Ripple carry/borrow must remain affine at each accepted step. Shifts use low-five-bit counts, SELECT guards must be provably affine, and every operand definition is available. Original memory/volatile/div/mod/trap instructions reject, even if dead. No sampled inference establishes the matrix. |
+| Final layout polishing | At most three distinct winning seeds and two trace layouts each, appended after finite alternatives. O(trace steps + blocks squared) within existing structural limits. | Entry and explicit targets are remapped; all instructions/effects remain unchanged. Every earlier candidate and search trajectory remains available. |
 | Finite-domain specialization | Backward bit-demand analysis on fresh SSA roots all returns/branches and every div/mod divisor. Propagate through phis, literal masks, logical shifts, comparisons and low-bit arithmetic until a fixed point; bounded exact constant folding exposes const/mov masks. Require at most six demanded raw input bits. Exhaustively interpret every projection, then emit a reduced decision graph. API caps 256 blocks, eight parameters, 8,000 instructions, 20k steps/case and 1M total steps; normal integration is capped at 1,000 instructions. | Projection preserves demanded result bits and full branch/divisor values. Fixed-point phi rules preserve the argument through loops. Exhaustive execution of the ORIGINAL program establishes return/totality for every equivalence class. Memory/volatile/explicit traps, projected traps and timeouts reject. |
 | Packed finite lookup | Pack table offsets from an unsigned base into 1/2/4/8/16/32-bit fields. High key bits select one of at most 16 words; low bits select a field through logical shift and mask. Restore the base with wrapping addition. | Offsets fit their fields, shifts never cross field boundaries, sparse/sign input bits retain their projected positions, fresh names exclude all input parameters. Width 32 bypasses shifts/masks. Decision/original alternatives remain available. |
 | Trip caps | Enumerate at most 48 acyclic header-to-backedge paths, each bounded in length; follow constant phi changes. | A bounded, nondecreasing measure must grow on every path. Unknown changes, cycles and excessive path counts reject the proof. |
@@ -261,6 +266,11 @@ estimates, and the layout candidates use frequencies from our own fixed
 inputs. Neither profiles nor sampled runs establish semantic facts.
 
 ## 7. Known problems
+
+- The affine recognizer is deliberately incomplete: a nonlinear intermediate
+  may cause rejection even when a later expression would cancel it. Dynamic
+  shifts, general multiply, unresolved CFGs/loops and wide input support fall
+  back to the existing optimizer. The emitted matrix is not claimed minimal.
 
 - Finite specialization handles only tiny statically proven input-bit domains
   with no memory effects. Failure of any gate retains existing candidates. Its

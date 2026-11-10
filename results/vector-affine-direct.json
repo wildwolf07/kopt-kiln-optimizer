@@ -1,0 +1,1888 @@
+{
+  "sha256": "e5e9db472da39655d606dcac2b30e7c3374094ccbaa471b7b64fc7bc446e8bb2",
+  "accepted": 47,
+  "rejected": 27,
+  "comparisons": 18168,
+  "timings": [
+    {
+      "case": "constant-zero-params",
+      "machine": "machine_default",
+      "original": 33,
+      "affine": 66,
+      "original_instructions": 1,
+      "affine_instructions": 2
+    },
+    {
+      "case": "constant-zero-params",
+      "machine": "machine_few_registers",
+      "original": 33,
+      "affine": 66,
+      "original_instructions": 1,
+      "affine_instructions": 2
+    },
+    {
+      "case": "constant-zero-params",
+      "machine": "machine_no_fused",
+      "original": 33,
+      "affine": 66,
+      "original_instructions": 1,
+      "affine_instructions": 2
+    },
+    {
+      "case": "constant-zero-params",
+      "machine": "machine_slow_memory",
+      "original": 33,
+      "affine": 66,
+      "original_instructions": 1,
+      "affine_instructions": 2
+    },
+    {
+      "case": "constant-zero-params",
+      "machine": "machine_wide_fast",
+      "original": 33,
+      "affine": 66,
+      "original_instructions": 1,
+      "affine_instructions": 2
+    },
+    {
+      "case": "zero-initialized",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "zero-initialized",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "zero-initialized",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "zero-initialized",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "zero-initialized",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "identity-32-columns",
+      "machine": "machine_default",
+      "original": 33,
+      "affine": 99,
+      "original_instructions": 1,
+      "affine_instructions": 4
+    },
+    {
+      "case": "identity-32-columns",
+      "machine": "machine_few_registers",
+      "original": 33,
+      "affine": 99,
+      "original_instructions": 1,
+      "affine_instructions": 4
+    },
+    {
+      "case": "identity-32-columns",
+      "machine": "machine_no_fused",
+      "original": 33,
+      "affine": 99,
+      "original_instructions": 1,
+      "affine_instructions": 4
+    },
+    {
+      "case": "identity-32-columns",
+      "machine": "machine_slow_memory",
+      "original": 33,
+      "affine": 99,
+      "original_instructions": 1,
+      "affine_instructions": 4
+    },
+    {
+      "case": "identity-32-columns",
+      "machine": "machine_wide_fast",
+      "original": 33,
+      "affine": 99,
+      "original_instructions": 1,
+      "affine_instructions": 4
+    },
+    {
+      "case": "bias-and-sign",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "bias-and-sign",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "bias-and-sign",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "bias-and-sign",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "bias-and-sign",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "two-high-domains",
+      "machine": "machine_default",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 6
+    },
+    {
+      "case": "two-high-domains",
+      "machine": "machine_few_registers",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 6
+    },
+    {
+      "case": "two-high-domains",
+      "machine": "machine_no_fused",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 6
+    },
+    {
+      "case": "two-high-domains",
+      "machine": "machine_slow_memory",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 6
+    },
+    {
+      "case": "two-high-domains",
+      "machine": "machine_wide_fast",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 6
+    },
+    {
+      "case": "four-param-bit127-bias",
+      "machine": "machine_default",
+      "original": 264,
+      "affine": 264,
+      "original_instructions": 12,
+      "affine_instructions": 12
+    },
+    {
+      "case": "four-param-bit127-bias",
+      "machine": "machine_few_registers",
+      "original": 2079,
+      "affine": 1320,
+      "original_instructions": 12,
+      "affine_instructions": 12
+    },
+    {
+      "case": "four-param-bit127-bias",
+      "machine": "machine_no_fused",
+      "original": 264,
+      "affine": 264,
+      "original_instructions": 12,
+      "affine_instructions": 12
+    },
+    {
+      "case": "four-param-bit127-bias",
+      "machine": "machine_slow_memory",
+      "original": 264,
+      "affine": 264,
+      "original_instructions": 12,
+      "affine_instructions": 12
+    },
+    {
+      "case": "four-param-bit127-bias",
+      "machine": "machine_wide_fast",
+      "original": 264,
+      "affine": 264,
+      "original_instructions": 12,
+      "affine_instructions": 12
+    },
+    {
+      "case": "high-param-register-names",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 198,
+      "original_instructions": 4,
+      "affine_instructions": 8
+    },
+    {
+      "case": "high-param-register-names",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 198,
+      "original_instructions": 4,
+      "affine_instructions": 8
+    },
+    {
+      "case": "high-param-register-names",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 198,
+      "original_instructions": 4,
+      "affine_instructions": 8
+    },
+    {
+      "case": "high-param-register-names",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 198,
+      "original_instructions": 4,
+      "affine_instructions": 8
+    },
+    {
+      "case": "high-param-register-names",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 198,
+      "original_instructions": 4,
+      "affine_instructions": 8
+    },
+    {
+      "case": "wire-group-cross-param-collision",
+      "machine": "machine_default",
+      "original": 165,
+      "affine": 264,
+      "original_instructions": 7,
+      "affine_instructions": 11
+    },
+    {
+      "case": "wire-group-cross-param-collision",
+      "machine": "machine_few_registers",
+      "original": 429,
+      "affine": 264,
+      "original_instructions": 7,
+      "affine_instructions": 11
+    },
+    {
+      "case": "wire-group-cross-param-collision",
+      "machine": "machine_no_fused",
+      "original": 165,
+      "affine": 264,
+      "original_instructions": 7,
+      "affine_instructions": 11
+    },
+    {
+      "case": "wire-group-cross-param-collision",
+      "machine": "machine_slow_memory",
+      "original": 165,
+      "affine": 264,
+      "original_instructions": 7,
+      "affine_instructions": 11
+    },
+    {
+      "case": "wire-group-cross-param-collision",
+      "machine": "machine_wide_fast",
+      "original": 165,
+      "affine": 264,
+      "original_instructions": 7,
+      "affine_instructions": 11
+    },
+    {
+      "case": "wire-reversal",
+      "machine": "machine_default",
+      "original": 132,
+      "affine": 198,
+      "original_instructions": 5,
+      "affine_instructions": 8
+    },
+    {
+      "case": "wire-reversal",
+      "machine": "machine_few_registers",
+      "original": 132,
+      "affine": 198,
+      "original_instructions": 5,
+      "affine_instructions": 8
+    },
+    {
+      "case": "wire-reversal",
+      "machine": "machine_no_fused",
+      "original": 132,
+      "affine": 198,
+      "original_instructions": 5,
+      "affine_instructions": 8
+    },
+    {
+      "case": "wire-reversal",
+      "machine": "machine_slow_memory",
+      "original": 132,
+      "affine": 198,
+      "original_instructions": 5,
+      "affine_instructions": 8
+    },
+    {
+      "case": "wire-reversal",
+      "machine": "machine_wide_fast",
+      "original": 132,
+      "affine": 198,
+      "original_instructions": 5,
+      "affine_instructions": 8
+    },
+    {
+      "case": "shift-count-high-bits-ignored",
+      "machine": "machine_default",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 4,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-count-high-bits-ignored",
+      "machine": "machine_few_registers",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 4,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-count-high-bits-ignored",
+      "machine": "machine_no_fused",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 4,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-count-high-bits-ignored",
+      "machine": "machine_slow_memory",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 4,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-count-high-bits-ignored",
+      "machine": "machine_wide_fast",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 4,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-zero-mod32",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "shift-zero-mod32",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "shift-zero-mod32",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "shift-zero-mod32",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "shift-zero-mod32",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "shift-sign-to-low",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-sign-to-low",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-sign-to-low",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-sign-to-low",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "shift-sign-to-low",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-bit31",
+      "machine": "machine_default",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-bit31",
+      "machine": "machine_few_registers",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-bit31",
+      "machine": "machine_no_fused",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-bit31",
+      "machine": "machine_slow_memory",
+      "original": 198,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-bit31",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-left",
+      "machine": "machine_default",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-left",
+      "machine": "machine_few_registers",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-left",
+      "machine": "machine_no_fused",
+      "original": 132,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-left",
+      "machine": "machine_slow_memory",
+      "original": 198,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "pow2-multiply-left",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "add-double-linear",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "add-double-linear",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "add-double-linear",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "add-double-linear",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "add-double-linear",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "add-disjoint-fields",
+      "machine": "machine_default",
+      "original": 132,
+      "affine": 165,
+      "original_instructions": 5,
+      "affine_instructions": 7
+    },
+    {
+      "case": "add-disjoint-fields",
+      "machine": "machine_few_registers",
+      "original": 132,
+      "affine": 165,
+      "original_instructions": 5,
+      "affine_instructions": 7
+    },
+    {
+      "case": "add-disjoint-fields",
+      "machine": "machine_no_fused",
+      "original": 132,
+      "affine": 165,
+      "original_instructions": 5,
+      "affine_instructions": 7
+    },
+    {
+      "case": "add-disjoint-fields",
+      "machine": "machine_slow_memory",
+      "original": 132,
+      "affine": 165,
+      "original_instructions": 5,
+      "affine_instructions": 7
+    },
+    {
+      "case": "add-disjoint-fields",
+      "machine": "machine_wide_fast",
+      "original": 132,
+      "affine": 165,
+      "original_instructions": 5,
+      "affine_instructions": 7
+    },
+    {
+      "case": "add-top-bit-linear",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "add-top-bit-linear",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "add-top-bit-linear",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "add-top-bit-linear",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "add-top-bit-linear",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "subtract-top-bit-linear",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "subtract-top-bit-linear",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "subtract-top-bit-linear",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "subtract-top-bit-linear",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "subtract-top-bit-linear",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "subtract-equal",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "subtract-equal",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "subtract-equal",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "subtract-equal",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "subtract-equal",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "and-equal",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "and-equal",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "and-equal",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "and-equal",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "and-equal",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 99,
+      "original_instructions": 2,
+      "affine_instructions": 4
+    },
+    {
+      "case": "and-complement",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "and-complement",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "and-complement",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "and-complement",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "and-complement",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "or-complement",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "or-complement",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "or-complement",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "or-complement",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "or-complement",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 66,
+      "original_instructions": 3,
+      "affine_instructions": 2
+    },
+    {
+      "case": "select-signbit",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 3,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-signbit",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 3,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-signbit",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 3,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-signbit",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 3,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-signbit",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 132,
+      "original_instructions": 3,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-repeated-guard-bits",
+      "machine": "machine_default",
+      "original": 165,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-repeated-guard-bits",
+      "machine": "machine_few_registers",
+      "original": 165,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-repeated-guard-bits",
+      "machine": "machine_no_fused",
+      "original": 165,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-repeated-guard-bits",
+      "machine": "machine_slow_memory",
+      "original": 165,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-repeated-guard-bits",
+      "machine": "machine_wide_fast",
+      "original": 165,
+      "affine": 132,
+      "original_instructions": 5,
+      "affine_instructions": 5
+    },
+    {
+      "case": "select-complement-guard-bits",
+      "machine": "machine_default",
+      "original": 198,
+      "affine": 66,
+      "original_instructions": 6,
+      "affine_instructions": 2
+    },
+    {
+      "case": "select-complement-guard-bits",
+      "machine": "machine_few_registers",
+      "original": 198,
+      "affine": 66,
+      "original_instructions": 6,
+      "affine_instructions": 2
+    },
+    {
+      "case": "select-complement-guard-bits",
+      "machine": "machine_no_fused",
+      "original": 198,
+      "affine": 66,
+      "original_instructions": 6,
+      "affine_instructions": 2
+    },
+    {
+      "case": "select-complement-guard-bits",
+      "machine": "machine_slow_memory",
+      "original": 198,
+      "affine": 66,
+      "original_instructions": 6,
+      "affine_instructions": 2
+    },
+    {
+      "case": "select-complement-guard-bits",
+      "machine": "machine_wide_fast",
+      "original": 198,
+      "affine": 66,
+      "original_instructions": 6,
+      "affine_instructions": 2
+    },
+    {
+      "case": "select-known-nonzero-wide-guard",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-known-nonzero-wide-guard",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-known-nonzero-wide-guard",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-known-nonzero-wide-guard",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-known-nonzero-wide-guard",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-guard-as-data",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-guard-as-data",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-guard-as-data",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-guard-as-data",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "select-guard-as-data",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-one-bit",
+      "machine": "machine_default",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-one-bit",
+      "machine": "machine_few_registers",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-one-bit",
+      "machine": "machine_no_fused",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-one-bit",
+      "machine": "machine_slow_memory",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-one-bit",
+      "machine": "machine_wide_fast",
+      "original": 99,
+      "affine": 99,
+      "original_instructions": 3,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-replicated-bit",
+      "machine": "machine_default",
+      "original": 165,
+      "affine": 99,
+      "original_instructions": 5,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-replicated-bit",
+      "machine": "machine_few_registers",
+      "original": 165,
+      "affine": 99,
+      "original_instructions": 5,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-replicated-bit",
+      "machine": "machine_no_fused",
+      "original": 165,
+      "affine": 99,
+      "original_instructions": 5,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-replicated-bit",
+      "machine": "machine_slow_memory",
+      "original": 165,
+      "affine": 99,
+      "original_instructions": 5,
+      "affine_instructions": 4
+    },
+    {
+      "case": "eq-replicated-bit",
+      "machine": "machine_wide_fast",
+      "original": 165,
+      "affine": 99,
+      "original_instructions": 5,
+      "affine_instructions": 4
+    },
+    {
+      "case": "lt-sign-bit",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "lt-sign-bit",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "lt-sign-bit",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "lt-sign-bit",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "lt-sign-bit",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 132,
+      "original_instructions": 2,
+      "affine_instructions": 5
+    },
+    {
+      "case": "flattened-linear-diamond",
+      "machine": "machine_default",
+      "original": 198,
+      "affine": 132,
+      "original_instructions": 7,
+      "affine_instructions": 5
+    },
+    {
+      "case": "flattened-linear-diamond",
+      "machine": "machine_few_registers",
+      "original": 198,
+      "affine": 132,
+      "original_instructions": 7,
+      "affine_instructions": 5
+    },
+    {
+      "case": "flattened-linear-diamond",
+      "machine": "machine_no_fused",
+      "original": 198,
+      "affine": 132,
+      "original_instructions": 7,
+      "affine_instructions": 5
+    },
+    {
+      "case": "flattened-linear-diamond",
+      "machine": "machine_slow_memory",
+      "original": 198,
+      "affine": 132,
+      "original_instructions": 7,
+      "affine_instructions": 5
+    },
+    {
+      "case": "flattened-linear-diamond",
+      "machine": "machine_wide_fast",
+      "original": 263,
+      "affine": 132,
+      "original_instructions": 7,
+      "affine_instructions": 5
+    },
+    {
+      "case": "folded-signed-comparison",
+      "machine": "machine_default",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "folded-signed-comparison",
+      "machine": "machine_few_registers",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "folded-signed-comparison",
+      "machine": "machine_no_fused",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "folded-signed-comparison",
+      "machine": "machine_slow_memory",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "folded-signed-comparison",
+      "machine": "machine_wide_fast",
+      "original": 66,
+      "affine": 66,
+      "original_instructions": 2,
+      "affine_instructions": 2
+    },
+    {
+      "case": "crc-8",
+      "machine": "machine_default",
+      "original": 891,
+      "affine": 660,
+      "original_instructions": 35,
+      "affine_instructions": 29
+    },
+    {
+      "case": "crc-8",
+      "machine": "machine_few_registers",
+      "original": 891,
+      "affine": 660,
+      "original_instructions": 35,
+      "affine_instructions": 29
+    },
+    {
+      "case": "crc-8",
+      "machine": "machine_no_fused",
+      "original": 990,
+      "affine": 660,
+      "original_instructions": 35,
+      "affine_instructions": 29
+    },
+    {
+      "case": "crc-8",
+      "machine": "machine_slow_memory",
+      "original": 891,
+      "affine": 660,
+      "original_instructions": 35,
+      "affine_instructions": 29
+    },
+    {
+      "case": "crc-8",
+      "machine": "machine_wide_fast",
+      "original": 891,
+      "affine": 660,
+      "original_instructions": 35,
+      "affine_instructions": 29
+    },
+    {
+      "case": "crc-192",
+      "machine": "machine_default",
+      "original": 48246,
+      "affine": 3663,
+      "original_instructions": 771,
+      "affine_instructions": 98
+    },
+    {
+      "case": "crc-192",
+      "machine": "machine_few_registers",
+      "original": 48246,
+      "affine": 3663,
+      "original_instructions": 771,
+      "affine_instructions": 98
+    },
+    {
+      "case": "crc-192",
+      "machine": "machine_no_fused",
+      "original": 49566,
+      "affine": 5049,
+      "original_instructions": 771,
+      "affine_instructions": 98
+    },
+    {
+      "case": "crc-192",
+      "machine": "machine_slow_memory",
+      "original": 48246,
+      "affine": 3663,
+      "original_instructions": 771,
+      "affine_instructions": 98
+    },
+    {
+      "case": "crc-192",
+      "machine": "machine_wide_fast",
+      "original": 48246,
+      "affine": 3663,
+      "original_instructions": 771,
+      "affine_instructions": 98
+    },
+    {
+      "case": "source-instructions-1000",
+      "machine": "machine_default",
+      "original": 63888,
+      "affine": 99,
+      "original_instructions": 1000,
+      "affine_instructions": 4
+    },
+    {
+      "case": "source-instructions-1000",
+      "machine": "machine_few_registers",
+      "original": 63888,
+      "affine": 99,
+      "original_instructions": 1000,
+      "affine_instructions": 4
+    },
+    {
+      "case": "source-instructions-1000",
+      "machine": "machine_no_fused",
+      "original": 64944,
+      "affine": 99,
+      "original_instructions": 1000,
+      "affine_instructions": 4
+    },
+    {
+      "case": "source-instructions-1000",
+      "machine": "machine_slow_memory",
+      "original": 63888,
+      "affine": 99,
+      "original_instructions": 1000,
+      "affine_instructions": 4
+    },
+    {
+      "case": "source-instructions-1000",
+      "machine": "machine_wide_fast",
+      "original": 63888,
+      "affine": 99,
+      "original_instructions": 1000,
+      "affine_instructions": 4
+    },
+    {
+      "case": "generated-linear-0",
+      "machine": "machine_default",
+      "original": 12969,
+      "affine": 165,
+      "original_instructions": 85,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-0",
+      "machine": "machine_few_registers",
+      "original": 22968,
+      "affine": 165,
+      "original_instructions": 85,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-0",
+      "machine": "machine_no_fused",
+      "original": 15015,
+      "affine": 165,
+      "original_instructions": 85,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-0",
+      "machine": "machine_slow_memory",
+      "original": 12969,
+      "affine": 165,
+      "original_instructions": 85,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-0",
+      "machine": "machine_wide_fast",
+      "original": 9504,
+      "affine": 165,
+      "original_instructions": 85,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-1",
+      "machine": "machine_default",
+      "original": 18249,
+      "affine": 165,
+      "original_instructions": 104,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-1",
+      "machine": "machine_few_registers",
+      "original": 30195,
+      "affine": 165,
+      "original_instructions": 104,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-1",
+      "machine": "machine_no_fused",
+      "original": 20328,
+      "affine": 165,
+      "original_instructions": 104,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-1",
+      "machine": "machine_slow_memory",
+      "original": 18249,
+      "affine": 165,
+      "original_instructions": 104,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-1",
+      "machine": "machine_wide_fast",
+      "original": 13794,
+      "affine": 165,
+      "original_instructions": 104,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-2",
+      "machine": "machine_default",
+      "original": 21351,
+      "affine": 231,
+      "original_instructions": 123,
+      "affine_instructions": 10
+    },
+    {
+      "case": "generated-linear-2",
+      "machine": "machine_few_registers",
+      "original": 34716,
+      "affine": 231,
+      "original_instructions": 123,
+      "affine_instructions": 10
+    },
+    {
+      "case": "generated-linear-2",
+      "machine": "machine_no_fused",
+      "original": 23430,
+      "affine": 231,
+      "original_instructions": 123,
+      "affine_instructions": 10
+    },
+    {
+      "case": "generated-linear-2",
+      "machine": "machine_slow_memory",
+      "original": 21351,
+      "affine": 231,
+      "original_instructions": 123,
+      "affine_instructions": 10
+    },
+    {
+      "case": "generated-linear-2",
+      "machine": "machine_wide_fast",
+      "original": 18051,
+      "affine": 231,
+      "original_instructions": 123,
+      "affine_instructions": 10
+    },
+    {
+      "case": "generated-linear-3",
+      "machine": "machine_default",
+      "original": 26697,
+      "affine": 99,
+      "original_instructions": 142,
+      "affine_instructions": 4
+    },
+    {
+      "case": "generated-linear-3",
+      "machine": "machine_few_registers",
+      "original": 44880,
+      "affine": 99,
+      "original_instructions": 142,
+      "affine_instructions": 4
+    },
+    {
+      "case": "generated-linear-3",
+      "machine": "machine_no_fused",
+      "original": 28809,
+      "affine": 99,
+      "original_instructions": 142,
+      "affine_instructions": 4
+    },
+    {
+      "case": "generated-linear-3",
+      "machine": "machine_slow_memory",
+      "original": 26697,
+      "affine": 99,
+      "original_instructions": 142,
+      "affine_instructions": 4
+    },
+    {
+      "case": "generated-linear-3",
+      "machine": "machine_wide_fast",
+      "original": 23100,
+      "affine": 99,
+      "original_instructions": 142,
+      "affine_instructions": 4
+    },
+    {
+      "case": "generated-linear-4",
+      "machine": "machine_default",
+      "original": 31977,
+      "affine": 165,
+      "original_instructions": 161,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-4",
+      "machine": "machine_few_registers",
+      "original": 50952,
+      "affine": 165,
+      "original_instructions": 161,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-4",
+      "machine": "machine_no_fused",
+      "original": 34056,
+      "affine": 165,
+      "original_instructions": 161,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-4",
+      "machine": "machine_slow_memory",
+      "original": 31977,
+      "affine": 165,
+      "original_instructions": 161,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-4",
+      "machine": "machine_wide_fast",
+      "original": 28347,
+      "affine": 165,
+      "original_instructions": 161,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-5",
+      "machine": "machine_default",
+      "original": 36366,
+      "affine": 66,
+      "original_instructions": 180,
+      "affine_instructions": 2
+    },
+    {
+      "case": "generated-linear-5",
+      "machine": "machine_few_registers",
+      "original": 57783,
+      "affine": 66,
+      "original_instructions": 180,
+      "affine_instructions": 2
+    },
+    {
+      "case": "generated-linear-5",
+      "machine": "machine_no_fused",
+      "original": 38379,
+      "affine": 66,
+      "original_instructions": 180,
+      "affine_instructions": 2
+    },
+    {
+      "case": "generated-linear-5",
+      "machine": "machine_slow_memory",
+      "original": 36366,
+      "affine": 66,
+      "original_instructions": 180,
+      "affine_instructions": 2
+    },
+    {
+      "case": "generated-linear-5",
+      "machine": "machine_wide_fast",
+      "original": 32604,
+      "affine": 66,
+      "original_instructions": 180,
+      "affine_instructions": 2
+    },
+    {
+      "case": "generated-linear-6",
+      "machine": "machine_default",
+      "original": 42834,
+      "affine": 363,
+      "original_instructions": 199,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-6",
+      "machine": "machine_few_registers",
+      "original": 66099,
+      "affine": 363,
+      "original_instructions": 199,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-6",
+      "machine": "machine_no_fused",
+      "original": 44913,
+      "affine": 363,
+      "original_instructions": 199,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-6",
+      "machine": "machine_slow_memory",
+      "original": 42834,
+      "affine": 363,
+      "original_instructions": 199,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-6",
+      "machine": "machine_wide_fast",
+      "original": 38016,
+      "affine": 363,
+      "original_instructions": 199,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-7",
+      "machine": "machine_default",
+      "original": 46068,
+      "affine": 165,
+      "original_instructions": 218,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-7",
+      "machine": "machine_few_registers",
+      "original": 72369,
+      "affine": 165,
+      "original_instructions": 218,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-7",
+      "machine": "machine_no_fused",
+      "original": 48180,
+      "affine": 165,
+      "original_instructions": 218,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-7",
+      "machine": "machine_slow_memory",
+      "original": 46068,
+      "affine": 165,
+      "original_instructions": 218,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-7",
+      "machine": "machine_wide_fast",
+      "original": 41778,
+      "affine": 165,
+      "original_instructions": 218,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-8",
+      "machine": "machine_default",
+      "original": 51249,
+      "affine": 165,
+      "original_instructions": 237,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-8",
+      "machine": "machine_few_registers",
+      "original": 77088,
+      "affine": 165,
+      "original_instructions": 237,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-8",
+      "machine": "machine_no_fused",
+      "original": 53361,
+      "affine": 165,
+      "original_instructions": 237,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-8",
+      "machine": "machine_slow_memory",
+      "original": 51249,
+      "affine": 165,
+      "original_instructions": 237,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-8",
+      "machine": "machine_wide_fast",
+      "original": 46035,
+      "affine": 165,
+      "original_instructions": 237,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-9",
+      "machine": "machine_default",
+      "original": 54252,
+      "affine": 165,
+      "original_instructions": 256,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-9",
+      "machine": "machine_few_registers",
+      "original": 83094,
+      "affine": 165,
+      "original_instructions": 256,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-9",
+      "machine": "machine_no_fused",
+      "original": 56364,
+      "affine": 165,
+      "original_instructions": 256,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-9",
+      "machine": "machine_slow_memory",
+      "original": 54252,
+      "affine": 165,
+      "original_instructions": 256,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-9",
+      "machine": "machine_wide_fast",
+      "original": 50655,
+      "affine": 165,
+      "original_instructions": 256,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-10",
+      "machine": "machine_default",
+      "original": 60027,
+      "affine": 363,
+      "original_instructions": 275,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-10",
+      "machine": "machine_few_registers",
+      "original": 91740,
+      "affine": 363,
+      "original_instructions": 275,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-10",
+      "machine": "machine_no_fused",
+      "original": 62139,
+      "affine": 363,
+      "original_instructions": 275,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-10",
+      "machine": "machine_slow_memory",
+      "original": 60027,
+      "affine": 363,
+      "original_instructions": 275,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-10",
+      "machine": "machine_wide_fast",
+      "original": 56496,
+      "affine": 363,
+      "original_instructions": 275,
+      "affine_instructions": 16
+    },
+    {
+      "case": "generated-linear-11",
+      "machine": "machine_default",
+      "original": 65670,
+      "affine": 165,
+      "original_instructions": 294,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-11",
+      "machine": "machine_few_registers",
+      "original": 100155,
+      "affine": 165,
+      "original_instructions": 294,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-11",
+      "machine": "machine_no_fused",
+      "original": 67749,
+      "affine": 165,
+      "original_instructions": 294,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-11",
+      "machine": "machine_slow_memory",
+      "original": 65670,
+      "affine": 165,
+      "original_instructions": 294,
+      "affine_instructions": 7
+    },
+    {
+      "case": "generated-linear-11",
+      "machine": "machine_wide_fast",
+      "original": 61479,
+      "affine": 165,
+      "original_instructions": 294,
+      "affine_instructions": 7
+    }
+  ]
+}

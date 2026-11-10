@@ -28,5 +28,9 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/finite_domain.py --kit-free
+      - name: Check bit-affine proof and structural gates
+        env:
+          CXX: g++-11
+        run: python3 tests/bit_affine.py --kit-free
       - name: Check dense-live-set limits with an independent arithmetic oracle
         run: python3 tests/pressure.py

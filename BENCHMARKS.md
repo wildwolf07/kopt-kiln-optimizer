@@ -1,3 +1,114 @@
+# optimizer-vector validation
+
+Isolated branch based on `optimizer-apex` (`0683c43`). Adds an exact symbolic
+bit-affine candidate and bounded final trace-layout polishing. Main and other
+candidate worktrees were not edited.
+
+Same practice inputs, 100 programs on five machines:
+
+| Machine | Apex sample cycles | Vector | Original / vector |
+|---|---:|---:|---:|
+| default | 9,844 | 9,813 | 10.56x |
+| few_registers | 14,991 | 14,941 | 13.53x |
+| no_fused | 12,307 | 12,264 | 8.80x |
+| slow_memory | 14,138 | 14,104 | 7.89x |
+| wide_fast | 7,464 | 7,431 | 7.50x |
+
+31 pairs improve, 457 tie, 12 regress. All regressions are one to three sample
+cycles: histogram/default 272 to 275; gray_code_sum and strength_ladder/no_fused
+11 to 13; fib and sum_cubes_mod on four machines gain one cycle of cost; and
+fnv_hash/few_registers 115 to 116. These are explicitly retained tradeoffs,
+not a claim of monotonic improvement on every unseen input.
+
+The straight-line CRC practice case improves on all machines: default 41 to 21,
+few_registers 41 to 26, no_fused 68 to 32, slow_memory 41 to 21, wide_fast 41 to 16.
+Final layout also improves merge_sorted/few_registers 526 to 504, and several
+finite-table cases. Per-pair data: `results/vector-sample-cycles.json`.
+
+Actual held-out random scoring uses eight inputs beyond the fixed edge prefix:
+
+| Machine | Apex random cycles | Vector | Geometric speedup apex | Vector |
+|---|---:|---:|---:|---:|
+| default | 56,949 | 56,709 | 7.042 | 7.158 |
+| few_registers | 88,196 | 88,038 | 10.768 | 10.925 |
+| no_fused | 71,161 | 70,859 | 6.360 | 6.418 |
+| slow_memory | 84,407 | 84,091 | 6.189 | 6.299 |
+| wide_fast | 42,867 | 42,525 | 5.038 | 5.121 |
+
+The affine-only ablation passed all 500 pairs, improving exactly the five CRC
+pairs and tying 495. Its held-out totals were 56,789 / 88,076 / 70,873 / 84,247 /
+42,667. Final layout accounts for the remaining gains and small regressions.
+Both stages append alternatives without changing earlier seed trajectories.
+
+Four independently generated machines, seed 2013, passed 400 paired checks:
+
+| Machine | Random apex | Vector | Paired geometric speedup |
+|---|---:|---:|---:|
+| generated_0 | 83,557 | 82,847 | 1.01316x |
+| generated_1 | 69,700 | 69,220 | 1.01436x |
+| generated_2 | 85,928 | 85,784 | 1.00548x |
+| generated_3 | 105,004 | 104,737 | 1.00115x |
+
+These vary issue width 1–4, registers 7/9/20/32, ALU latency 1–3, cache size
+8/16/64, load latency 1–12, and fused availability. Every row validates both
+versions on sample +100 generated inputs, then repeat output. Details are in
+`results/vector-machine-sweep.json`.
+
+Generated CRC/XOR kernels (`tools/affine_sweep.py`, seed 2020): 41 pairs improve,
+nine tie and none regress across 50 complete-optimizer comparisons. The source
+uses different polynomials and branch/selection forms, plus full-width XOR/shift
+chains. Examples on default: a 96-round CRC-style function 700 to 26 cycles;
+a 24-round XOR/shift function 226 to 96. These are independent generated tests,
+not hidden-score claims.
+
+| Machine | Generated sample apex | Vector | Random apex | Vector |
+|---|---:|---:|---:|---:|
+| default | 2,015 | 369 | 16,120 | 2,952 |
+| few_registers | 2,015 | 407 | 16,120 | 3,256 |
+| no_fused | 2,313 | 580 | 18,504 | 4,640 |
+| slow_memory | 2,015 | 369 | 16,120 | 2,952 |
+| wide_fast | 2,015 | 308 | 16,120 | 2,464 |
+
+Direct pass tests bypass optimizer selection and fallback: 18,168 official
+comparisons across 74 sources (47 accepted, 27 rejected), using zero, basis,
+edge, independent random and superposition inputs. They check the source matrix
+independently from basis executions, output preservation on rejection, SSA,
+repeat determinism, high parameter IDs, bit 31, complement algebra, exact affine
+carry/borrow, masked shift counts and grouped-wire emission. A 771-instruction
+CRC-style source becomes 98 raw instructions; raw output is not always the best
+candidate. On 33 basis/zero inputs, default cycles drop 48,246 to 3,663; no_fused
+49,566 to 5,049. The same proof/structural acceptance gates have a kit-free CI
+mode. Source proof, not sampled affine behavior, justifies the transformation.
+
+Frozen source gates: 2,500 stronger fuzz programs seed 2011, 1,000 metamorphic
+programs seed 2012, 300 ASan/UBSan fuzz programs seed 2014, 35 regressions, 50 smoke
+pairs plus four negative controls, dense pressure sizes 900/2,000/15,000, and a
+strict Linux C++17 build all passed. The initial 500-pair combined run passed
+sample +100 generated inputs, determinism and a five-second timeout; slowest
+invocation 1.51 seconds under concurrent validation (64.4 seconds suite wall).
+
+The lower-load release run repeated all 500 checks with identical cycle
+results: slowest invocation 1.38 seconds, suite wall 63.5 seconds. To assess
+compiler overhead without comparing unrelated loads, a separate run alternated
+apex/vector directly on the 100 default-machine inputs, one at a time with
+strict self-checks. Median wall time was 98.43 / 98.32 ms; maximum 1.041 / 0.918
+seconds, sums 16.239 / 15.952 seconds. These noisy observations do not establish
+a controlled compiler-throughput speedup. They show no material added overhead
+in this paired run. Data: `results/vector-compile-times.json`.
+
+Generated 100k straight/loop inputs finish in 2.27 / 9.07 seconds in the Linux
+ARM VM under concurrent work, peak roughly 120 / 177 MiB RSS. Outputs are
+byte-identical to the previously validated apex Linux outputs. These are not
+judge-x86 runtime measurements. Large programs skip the new bounded stages.
+
+Neither test totals nor research references establish a winning contest rank.
+Known limitations and universal proof obligations are documented in DESIGN.md;
+RESEARCH.md lists the primary references and independent implementation choices.
+
+Historical apex/forge/frontier/next evidence follows.
+
+---
+
 # optimizer-apex validation
 
 Isolated branch based on `optimizer-forge` (`dac7d75`). Integrates large-function
@@ -270,7 +381,16 @@ Focused tests bypass candidate selection and fallback:
   A separate AddressSanitizer/UndefinedBehaviorSanitizer build passed 300 fresh
   fuzz programs (seed 1414).
 - Linux strict C++17 compilation passed with `-Wall -Wextra -Werror -pedantic`.
-  Generated 100k straight/loop inputs finish in 3.11/11.20 seconds in the Linux
+  The lower-load release run repeated all 500 checks with identical cycle
+results: slowest invocation 1.38 seconds, suite wall 63.5 seconds. To assess
+compiler overhead without comparing unrelated loads, a separate run alternated
+apex/vector directly on the 100 default-machine inputs, one at a time with
+strict self-checks. Median wall time was 98.43 / 98.32 ms; maximum 1.041 / 0.918
+seconds, sums 16.239 / 15.952 seconds. These noisy observations do not establish
+a controlled compiler-throughput speedup. They show no material added overhead
+in this paired run. Data: `results/vector-compile-times.json`.
+
+Generated 100k straight/loop inputs finish in 3.11/11.20 seconds in the Linux
   ARM VM, using about 119/177 MiB peak RSS. This is not the judge's x86 CPU.
   Mac times under concurrent work were 4.01/11.76 seconds. Result cycles are
   170,026 / 376,633 versus original 686,591 / 558,161 on default inputs.

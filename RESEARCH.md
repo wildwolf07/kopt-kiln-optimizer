@@ -96,3 +96,26 @@ An initial global lazy-coalescing experiment changed small-case search paths;
 restricting it to more than 4,096 values preserves all practice cycle counts.
 The separate deterministic compile-work budget was not imported, to keep the
 existing search coverage while measuring these changes in isolation.
+
+The bit-affine alternative uses a separate proof domain: every symbolic bit is
+an XOR of raw input bits plus a constant. Unlike finite specialization, it does
+not enumerate a small subset of the input domain. AND/OR products are admitted
+only for constants or identical/complementary affine forms. Carry/borrow bits
+must remain affine; unsupported nonlinear expressions reject. Bounded pure
+if-conversion produces a straight-line expression, and the result matrix is
+synthesized using masked input-bit selections and XORs, with shared shifts for
+wire columns. This is independent code, not an imported circuit optimizer.
+
+References: the [Linux CRC tutorial](https://docs.kernel.org/staging/crc32.html)
+explains polynomial arithmetic without carries, and Boyar, Matthews and Peralta,
+[On the shortest linear straight-line program for computing linear forms](https://www.nist.gov/publications/shortest-linear-straight-line-program-computing-linear-forms),
+provides context for linear-circuit optimization. Our synthesis is a bounded
+heuristic and makes no optimal-circuit claim. The implementation accepts arbitrary
+proved-affine sources; no CRC name, polynomial, hash or program fingerprint is
+used to recognize input files. Coefficients are derived from the supplied SSA.
+
+Final trace-layout polishing was added after finite-table construction because
+those late decision graphs previously missed the earlier layout stage. Six
+bounded alternatives preserve every prior seed/candidate; the exact timing
+model chooses among them. Some sample inputs regress by one to three cycles,
+so both paired held-out scoring and unseen-machine comparisons are retained.

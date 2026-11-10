@@ -939,6 +939,34 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             cands.push_back(std::move(c));
         }
     }
+    // Final-only layout candidates: preserve every earlier seed lineage.
+    if (effort == 2 && passEnabled("latepolish")) {
+        const auto seeds = bestDistinct(cands, 3);
+        std::vector<Cand> polished;
+        for (const Cand *seed : seeds) for (bool chains : {true, false}) {
+            Cand c; c.p = traceLayout(seed->p, inputs, chains);
+            if (printProgram(c.p) == printProgram(seed->p)) continue;
+            c.what = seed->what + (chains ? "/lateTrace" : "/lateHot");
+            c.flags = seed->flags; quick(c); polished.push_back(std::move(c));
+        }
+        for (Cand &c : polished) cands.push_back(std::move(c));
+    }
+    if (progSize <= 1000 && !dense && passEnabled("affine")) {
+        Program p;
+        if (bitAffineFunction(base, m, p)) {
+            Cand raw; raw.p = p; raw.what = "bit-affine"; quick(raw); cands.push_back(std::move(raw));
+            Func f; std::string err;
+            if (buildSSA(p, f, err)) {
+                instSimplify(f); dce(f); simplifyCFG(f);
+                for (int pre = 0; pre < 2; pre++) {
+                    Func copy = f; BackendOptions bo; bo.preSchedule = pre != 0;
+                    Cand c; c.p = lowerToProgram(copy, m, bo);
+                    c.what = pre ? "bit-affineS" : "bit-affine-lowered"; quick(c);
+                    cands.push_back(std::move(c));
+                }
+            }
+        }
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

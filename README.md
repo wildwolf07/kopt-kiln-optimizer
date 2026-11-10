@@ -28,18 +28,19 @@ profile-guided timing inputs. The `optimizer-frontier` branch combines
 allocation from `58b5077`, pressure-aware scheduling, pure-region tree ordering,
 and bounded rematerialization. The `optimizer-forge` branch builds on `f6088bb` with backward scheduling,
 pure instruction sinking, source-derived finite-domain specialization, and a
-range-cache lifetime fix. This `optimizer-apex` branch builds on `dac7d75`: large-function lazy
+range-cache lifetime fix. The `optimizer-apex` branch builds on `dac7d75`: large-function lazy
 coalescing and local analysis refresh reduce compile work; backward bit-demand
 proofs and packed lookup alternatives cover additional finite computations.
-Other active worktrees are not modified.
+This `optimizer-vector` branch adds exact bit-affine synthesis and final
+layout polishing. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 9,844 | 10.53x |
-| few_registers | 202,164 | 25,592 | 14,991 | 13.49x |
-| no_fused | 107,966 | 20,218 | 12,307 | 8.77x |
-| slow_memory | 111,254 | 24,319 | 14,138 | 7.87x |
-| wide_fast | 55,744 | 12,923 | 7,464 | 7.47x |
+| default | 103,671 | 16,527 | 9,813 | 10.56x |
+| few_registers | 202,164 | 25,592 | 14,941 | 13.53x |
+| no_fused | 107,966 | 20,218 | 12,264 | 8.80x |
+| slow_memory | 111,254 | 24,319 | 14,104 | 7.89x |
+| wide_fast | 55,744 | 12,923 | 7,431 | 7.50x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
@@ -123,8 +124,15 @@ and emits a reduced decision graph. It derives every table from the supplied
 program at runtime; it has no stored program answers. [RESEARCH.md](RESEARCH.md)
 records the references, independent adaptations and rejected experiments.
 
-The practice-suite cycle totals remain identical to forge. Improvements this
-round concern compiler throughput and generated recurrences whose relevant
-input bits become visible only through final masks. `tools/finite_sweep.py`
+The apex baseline preserved forge's practice-suite cycle totals. That stage
+improved compiler throughput and generated recurrences whose relevant input
+bits become visible only through final masks. `tools/finite_sweep.py`
 reproduces the complete-optimizer comparison. The lookup values always come
 from exhaustive evaluation of the program supplied on the command line.
+
+The bit-affine alternative proves XOR/shift/selection expressions for every
+input using GF(2) coefficient forms, then emits a branch-free matrix. It does
+not guess linearity from sample executions. Unsupported or nonlinear expressions
+retain earlier candidates. `tools/affine_sweep.py` checks complete optimizers on
+independently generated CRC-style and XOR/shift kernels; `tests/bit_affine.py`
+validates the pass directly against the official interpreter.

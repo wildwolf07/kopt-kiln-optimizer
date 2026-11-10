@@ -1,0 +1,516 @@
+{
+  "summary": {
+    "apex": {
+      "median": 0.09843033348442987,
+      "max": 1.041294291964732,
+      "sum": 16.239055708399974
+    },
+    "vector": {
+      "median": 0.0983189579565078,
+      "max": 0.9184567920165136,
+      "sum": 15.952480410574935
+    }
+  },
+  "rows": [
+    {
+      "program": "addsh_index",
+      "apex": 0.257406958960928,
+      "vector": 0.26187312498223037
+    },
+    {
+      "program": "adler32",
+      "vector": 0.9184567920165136,
+      "apex": 1.041294291964732
+    },
+    {
+      "program": "alias_hazard",
+      "apex": 0.020553625072352588,
+      "vector": 0.018502874998375773
+    },
+    {
+      "program": "alias_stores",
+      "vector": 0.2298896659631282,
+      "apex": 0.23294020793400705
+    },
+    {
+      "program": "array_max",
+      "apex": 0.3186063750181347,
+      "vector": 0.32896004093345255
+    },
+    {
+      "program": "array_min",
+      "vector": 0.3212421250063926,
+      "apex": 0.3310257908888161
+    },
+    {
+      "program": "array_sum",
+      "apex": 0.23384137509856373,
+      "vector": 0.23486637498717755
+    },
+    {
+      "program": "binary_search",
+      "vector": 0.13374766695778817,
+      "apex": 0.12668045901227742
+    },
+    {
+      "program": "bit_reverse",
+      "apex": 0.021975915995426476,
+      "vector": 0.02140962495468557
+    },
+    {
+      "program": "bounds_trap",
+      "vector": 0.2931834169430658,
+      "apex": 0.2936189580941573
+    },
+    {
+      "program": "branchy_select",
+      "apex": 0.3959613749757409,
+      "vector": 0.4045417499728501
+    },
+    {
+      "program": "bubble_sort",
+      "vector": 0.3428779999958351,
+      "apex": 0.3464138329727575
+    },
+    {
+      "program": "checked_add_trap",
+      "apex": 0.015581166022457182,
+      "vector": 0.015462250099517405
+    },
+    {
+      "program": "collatz",
+      "vector": 0.31229124998208135,
+      "apex": 0.28905729099642485
+    },
+    {
+      "program": "common_subexpr",
+      "apex": 0.020136874984018505,
+      "vector": 0.019022374995984137
+    },
+    {
+      "program": "const_chain",
+      "vector": 0.0148477079346776,
+      "apex": 0.012102499953471124
+    },
+    {
+      "program": "constant_branch",
+      "apex": 0.02445324999280274,
+      "vector": 0.022368042031303048
+    },
+    {
+      "program": "conv_mac",
+      "vector": 0.26188833406195045,
+      "apex": 0.24573995894752443
+    },
+    {
+      "program": "count_above",
+      "apex": 0.41873295803088695,
+      "vector": 0.37172375002410263
+    },
+    {
+      "program": "count_divisors",
+      "vector": 0.5259399169590324,
+      "apex": 0.5309688750421628
+    },
+    {
+      "program": "crc_bitwise",
+      "apex": 0.185739167034626,
+      "vector": 0.1870748749934137
+    },
+    {
+      "program": "dead_div_trap",
+      "vector": 0.013189583085477352,
+      "apex": 0.015142082935199142
+    },
+    {
+      "program": "dead_load_trap",
+      "apex": 0.0145546660060063,
+      "vector": 0.01749362493865192
+    },
+    {
+      "program": "dead_mod_in_loop",
+      "vector": 0.09328983293380588,
+      "apex": 0.09036145801655948
+    },
+    {
+      "program": "dead_overwritten_stores",
+      "apex": 0.23239045799709857,
+      "vector": 0.21899104199837893
+    },
+    {
+      "program": "dfa_dispatch",
+      "vector": 0.24021120893303305,
+      "apex": 0.2553653749637306
+    },
+    {
+      "program": "digit_sum",
+      "apex": 0.04827775002922863,
+      "vector": 0.05081649997737259
+    },
+    {
+      "program": "div_trap",
+      "vector": 0.015229540993459523,
+      "apex": 0.013599791913293302
+    },
+    {
+      "program": "dot_pairs",
+      "apex": 0.29817712504882365,
+      "vector": 0.29295524989720434
+    },
+    {
+      "program": "dot_product",
+      "vector": 0.10473945795092732,
+      "apex": 0.114070542040281
+    },
+    {
+      "program": "factorial_mod",
+      "apex": 0.10801387496758252,
+      "vector": 0.12018370896112174
+    },
+    {
+      "program": "fib",
+      "vector": 0.7352327909320593,
+      "apex": 0.7465026250574738
+    },
+    {
+      "program": "fletcher16",
+      "apex": 0.4772656250279397,
+      "vector": 0.48270858300384134
+    },
+    {
+      "program": "fnv_hash",
+      "vector": 0.2345783329801634,
+      "apex": 0.2266008339356631
+    },
+    {
+      "program": "gcd",
+      "apex": 0.22883866704069078,
+      "vector": 0.21981712500564754
+    },
+    {
+      "program": "gray_code_sum",
+      "vector": 0.5918322919169441,
+      "apex": 0.5963832080597058
+    },
+    {
+      "program": "guarded_div",
+      "apex": 0.04550824989564717,
+      "vector": 0.04645825002808124
+    },
+    {
+      "program": "hamming_dist",
+      "vector": 0.12829958298243582,
+      "apex": 0.13196625001728535
+    },
+    {
+      "program": "histogram",
+      "apex": 0.22515750001184642,
+      "vector": 0.2048761659534648
+    },
+    {
+      "program": "horner",
+      "vector": 0.05859491601586342,
+      "apex": 0.056114875013008714
+    },
+    {
+      "program": "index_trap",
+      "apex": 0.012253666995093226,
+      "vector": 0.016216917079873383
+    },
+    {
+      "program": "insertion_sort",
+      "vector": 0.10334808297920972,
+      "apex": 0.09878891694825143
+    },
+    {
+      "program": "irreducible_loop",
+      "apex": 0.02400500001385808,
+      "vector": 0.024023958016186953
+    },
+    {
+      "program": "is_prime",
+      "vector": 0.1258075829828158,
+      "apex": 0.12917054200079292
+    },
+    {
+      "program": "isqrt",
+      "apex": 0.27004404191393405,
+      "vector": 0.27312404196709394
+    },
+    {
+      "program": "jump_chain",
+      "vector": 0.018116416060365736,
+      "apex": 0.021790458005852997
+    },
+    {
+      "program": "junk_dead",
+      "apex": 0.02400208404287696,
+      "vector": 0.02379170898348093
+    },
+    {
+      "program": "lcm_pair",
+      "vector": 0.31995008303783834,
+      "apex": 0.3168199169449508
+    },
+    {
+      "program": "log_then_divide",
+      "apex": 0.012044875067658722,
+      "vector": 0.009442333015613258
+    },
+    {
+      "program": "loop_invariant",
+      "vector": 0.021852249978110194,
+      "apex": 0.024296707939356565
+    },
+    {
+      "program": "many_live",
+      "apex": 0.036868875031359494,
+      "vector": 0.04531291697639972
+    },
+    {
+      "program": "matmul4",
+      "vector": 0.25802833295892924,
+      "apex": 0.28773124993313104
+    },
+    {
+      "program": "matrix_add4",
+      "apex": 0.13236616703215986,
+      "vector": 0.13028220797423273
+    },
+    {
+      "program": "matvec8",
+      "vector": 0.2659031660296023,
+      "apex": 0.2800369580509141
+    },
+    {
+      "program": "merge_sorted",
+      "apex": 0.2894874169724062,
+      "vector": 0.2998740829061717
+    },
+    {
+      "program": "mini_interp",
+      "vector": 0.08446441602427512,
+      "apex": 0.08231870899908245
+    },
+    {
+      "program": "multi_exit",
+      "apex": 0.5004789590602741,
+      "vector": 0.5117312090005726
+    },
+    {
+      "program": "nested_invariant",
+      "vector": 0.026196249993517995,
+      "apex": 0.02556262502912432
+    },
+    {
+      "program": "paren_depth",
+      "apex": 0.19160233298316598,
+      "vector": 0.18019833392463624
+    },
+    {
+      "program": "parity_fold",
+      "vector": 0.015600167098455131,
+      "apex": 0.01642041699960828
+    },
+    {
+      "program": "partial_redundancy",
+      "apex": 0.02008087490685284,
+      "vector": 0.0216339590260759
+    },
+    {
+      "program": "poly_mac",
+      "vector": 0.015954957925714552,
+      "apex": 0.016321792034432292
+    },
+    {
+      "program": "popcount",
+      "apex": 0.02292916609439999,
+      "vector": 0.019683375023305416
+    },
+    {
+      "program": "pow_fast",
+      "vector": 0.058370458078570664,
+      "apex": 0.05580437497701496
+    },
+    {
+      "program": "powmod",
+      "apex": 0.08146150002721697,
+      "vector": 0.07912150002084672
+    },
+    {
+      "program": "prefix_sum",
+      "vector": 0.07939291698858142,
+      "apex": 0.07040254108142108
+    },
+    {
+      "program": "redundant_loads",
+      "apex": 0.2567690839059651,
+      "vector": 0.2502218750305474
+    },
+    {
+      "program": "reverse_array",
+      "vector": 0.05291220801882446,
+      "apex": 0.06690454098861665
+    },
+    {
+      "program": "rle_encode",
+      "apex": 0.08939800004009157,
+      "vector": 0.08794587501324713
+    },
+    {
+      "program": "rotate_array",
+      "vector": 0.08395666698925197,
+      "apex": 0.0846305830636993
+    },
+    {
+      "program": "rotate_mix",
+      "apex": 0.06720483407843858,
+      "vector": 0.06106304097920656
+    },
+    {
+      "program": "row_sums",
+      "vector": 0.15212491597048938,
+      "apex": 0.15609354199841619
+    },
+    {
+      "program": "run_count",
+      "apex": 0.4948124170769006,
+      "vector": 0.49561591690871865
+    },
+    {
+      "program": "sem_bit_mix",
+      "vector": 0.018737834063358605,
+      "apex": 0.01924537494778633
+    },
+    {
+      "program": "sem_div_mod",
+      "apex": 0.01950504200067371,
+      "vector": 0.01751549995969981
+    },
+    {
+      "program": "sem_mul_wrap",
+      "vector": 0.01739462499972433,
+      "apex": 0.021932290983386338
+    },
+    {
+      "program": "sem_select_abs",
+      "apex": 0.02778737503103912,
+      "vector": 0.02482129097916186
+    },
+    {
+      "program": "sem_shifts",
+      "vector": 0.023268957971595228,
+      "apex": 0.01934400002937764
+    },
+    {
+      "program": "sem_signed_cmp",
+      "apex": 0.016648082993924618,
+      "vector": 0.016310833976604044
+    },
+    {
+      "program": "sensor_drain",
+      "vector": 0.0871614160714671,
+      "apex": 0.0980717500206083
+    },
+    {
+      "program": "sensor_sum",
+      "apex": 0.08954866696149111,
+      "vector": 0.09145100007299334
+    },
+    {
+      "program": "sensor_threshold",
+      "vector": 0.14141470799222589,
+      "apex": 0.14272254204843193
+    },
+    {
+      "program": "sieve",
+      "apex": 0.185754333040677,
+      "vector": 0.19582554197404534
+    },
+    {
+      "program": "spill_storm",
+      "vector": 0.23978466703556478,
+      "apex": 0.26094829197973013
+    },
+    {
+      "program": "stencil3",
+      "apex": 0.06023087503854185,
+      "vector": 0.055932583985850215
+    },
+    {
+      "program": "store_then_div_trap",
+      "vector": 0.01218216703273356,
+      "apex": 0.015970333013683558
+    },
+    {
+      "program": "strength_ladder",
+      "apex": 0.4403209580341354,
+      "vector": 0.4110673749819398
+    },
+    {
+      "program": "sum_cubes_mod",
+      "vector": 0.12166170810814947,
+      "apex": 0.12629262497648597
+    },
+    {
+      "program": "sum_sq",
+      "apex": 0.0246237909886986,
+      "vector": 0.028915375005453825
+    },
+    {
+      "program": "swap_via_memory",
+      "vector": 0.021326082991436124,
+      "apex": 0.01929487509187311
+    },
+    {
+      "program": "transpose8",
+      "apex": 0.12422887503635138,
+      "vector": 0.13164070900529623
+    },
+    {
+      "program": "unreachable_blocks",
+      "vector": 0.011778832995332778,
+      "apex": 0.016018749913200736
+    },
+    {
+      "program": "unrolled_crc12",
+      "apex": 0.03208383300807327,
+      "vector": 0.03377562505193055
+    },
+    {
+      "program": "unrolled_poly",
+      "vector": 0.06343529105652124,
+      "apex": 0.059593165991827846
+    },
+    {
+      "program": "vec_add",
+      "apex": 0.37439412507228553,
+      "vector": 0.3710929580265656
+    },
+    {
+      "program": "vending_fsm",
+      "vector": 0.12024316599126905,
+      "apex": 0.11037316592410207
+    },
+    {
+      "program": "vlog_every_other",
+      "apex": 0.06644687498919666,
+      "vector": 0.059740541968494654
+    },
+    {
+      "program": "wide_expression",
+      "vector": 0.03698479104787111,
+      "apex": 0.030095709022134542
+    },
+    {
+      "program": "word_count",
+      "apex": 0.14527525007724762,
+      "vector": 0.14698875008616596
+    },
+    {
+      "program": "xorshift",
+      "vector": 0.13109820790123194,
+      "apex": 0.14627941697835922
+    }
+  ]
+}

@@ -52,6 +52,7 @@ bool aliasForward(Func &f);        // load after may-alias stores -> select on a
 bool closedFormLoops(Func &f);     // counted summation loops -> exit values in closed form
 bool deadScratchStores(Func &f);   // stores to unread constant scratch words
 bool popcountLoops(Func &f);       // bit-counting loops -> SWAR population count
+bool bitAffineFunction(const Program &in, const Machine &m, Program &out);
 bool finiteInputMasks(const Program &in, std::vector<uint32_t> &masks);
 std::vector<Program> finiteAlternatives(const Program &in, bool decision, bool packed);
 bool finitePackedFunction(const Program &in, const Machine &m, Program &out);
