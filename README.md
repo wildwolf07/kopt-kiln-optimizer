@@ -36,11 +36,11 @@ layout polishing. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 9,758 | 10.62x |
-| few_registers | 202,164 | 25,592 | 14,999 | 13.48x |
-| no_fused | 107,966 | 20,218 | 12,186 | 8.86x |
-| slow_memory | 111,254 | 24,319 | 13,977 | 7.96x |
-| wide_fast | 55,744 | 12,923 | 7,270 | 7.67x |
+| default | 103,671 | 16,527 | 9,318 | 11.13x |
+| few_registers | 202,164 | 25,592 | 14,679 | 13.77x |
+| no_fused | 107,966 | 20,218 | 11,696 | 9.23x |
+| slow_memory | 111,254 | 24,319 | 13,760 | 8.09x |
+| wide_fast | 55,744 | 12,923 | 7,186 | 7.76x |
 
 Every program/machine pair is checked against the kit on its sample plus 50
 additional inputs, and optimized twice for determinism. Individual programs can
