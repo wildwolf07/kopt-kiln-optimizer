@@ -779,16 +779,22 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     if (effort == 2 && passEnabled("loadphis")) {
         const std::vector<const Cand *> best = bestDistinct(cands, kSeeds);
         std::vector<Cand> more;
-        size_t lpWork = 0;   // deterministic budget: instructions recompiled here
+        size_t lpWork = 0, specWork = 0;   // deterministic budgets: instructions recompiled here
         for (size_t i = 0; i < best.size(); i++)
-            for (int ss = 0; ss < 2; ss++) {
-                if (lpWork + best[i]->p.instrCount() > 8000) continue;
-                lpWork += best[i]->p.instrCount();
+            for (int ss = 0; ss < 3; ss++) {
+                // ss == 2: speculation on the transformed program (work of an
+                // unrolled chain's later steps moves above its exit branches).
+                if (ss == 2 && best[i]->flags.speculate) continue;
+                size_t &budgetUsed = ss == 2 ? specWork : lpWork;   // separate budgets
+                if (budgetUsed + best[i]->p.instrCount() > 8000) continue;
+                budgetUsed += best[i]->p.instrCount();
                 Flags fl = best[i]->flags;
-                fl.loadPhis = true;
+                fl.loadPhis = ss != 2;
                 fl.storeSel = ss == 1;
+                if (ss == 2) fl.speculate = true;
                 std::vector<Cand> got;
-                compileVariants(best[i]->p, m, opt.maxLevel, fl, best[i]->what + (ss ? "/ss" : "/lp"), true, got);
+                compileVariants(best[i]->p, m, opt.maxLevel, fl,
+                                best[i]->what + (ss == 2 ? "/spec" : ss ? "/ss" : "/lp"), ss != 2, got);
                 for (Cand &c : got) quick(c);
                 for (Cand &c : got) more.push_back(std::move(c));
             }
