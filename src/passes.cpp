@@ -305,7 +305,6 @@ void computeIVRanges(Func &f) {
     }
 }
 
-void clearIVRanges() { gIVRange.clear(); }
 
 // ---------------------------------------------------------------------------
 // Value range propagation (signed intervals) with branch refinement.
@@ -653,6 +652,12 @@ bool tripCaps(const Func &f, const DomInfo &d, const std::vector<DefSite> &ds, c
 
 
 }  // namespace
+
+// Range facts belong to one function: both tables are indexed by its value
+// numbers, so they are emptied whenever a new function is built (stages that
+// lower a rebuilt function without running the range analyses must not see
+// another function's facts).
+void clearIVRanges() { gIVRange.clear(); gVRP.clear(); }
 
 void computeVRP(Func &f) {
     f.resolveAll();

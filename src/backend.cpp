@@ -370,6 +370,7 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
             if (!B.alive) continue;
             liveList.clear();
             for (int v : L.liveOut[b]) { isLive[v] = 1; liveList.push_back(v); }
+            int liveCount = static_cast<int>(liveList.size());
             for (int i = static_cast<int>(B.insts.size()) - 1; i >= 0; i--) {
                 Inst &x = B.insts[i];
                 if (x.dst >= 0) {
@@ -377,10 +378,18 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
                     used[d] = 1;
                     cost[d] += B.freq;
                     int movSrc = (x.op == OP_MOV && !x.a[0].isConst) ? x.a[0].v : -1;
+                    // Drop dead entries once they outnumber the live ones (the
+                    // same edges are added; long blocks stay near-linear).
+                    if (liveList.size() > 64 && liveList.size() > 2 * static_cast<size_t>(liveCount)) {
+                        size_t w = 0;
+                        for (int l : liveList) if (isLive[l]) liveList[w++] = l;
+                        liveList.resize(w);
+                    }
                     for (int l : liveList)
                         if (isLive[l] && l != d && l != movSrc) g.add(d, l);
                     if (g.exhausted) return false;
                     if (movSrc >= 0) moves.push_back({d, movSrc, B.freq});
+                    if (isLive[d]) liveCount--;
                     isLive[d] = 0;
                 }
                 for (int a = 0; a < x.n; a++) {
@@ -388,7 +397,7 @@ bool allocateK(Func &f, int K, Allocation &A, int reuse, bool spreadColors) {
                     int u = x.a[a].v;
                     used[u] = 1;
                     cost[u] += B.freq;
-                    if (!isLive[u]) { isLive[u] = 1; liveList.push_back(u); }
+                    if (!isLive[u]) { isLive[u] = 1; liveList.push_back(u); liveCount++; }
                 }
             }
             for (int l : liveList) isLive[l] = 0;

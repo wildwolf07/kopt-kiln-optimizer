@@ -284,6 +284,14 @@ Program traceLayout(const Program &p, const std::vector<Input> &inputs, bool cha
 
 // Optimize `in` with the SSA pipeline and lower it; with both register
 // allocators when the plain one needs more names than the machine has.
+// Deterministic compile-work meter (instructions lowered; K-name allocation
+// counts three times). Phase 1 always runs in full; once the budget is spent,
+// later stages stop trying K-name allocations, the costly part. It counts
+// work, never time, so the output is the same on every machine and run.
+size_t gCompileWork = 0;
+bool gWorkLimited = false;      // true from phase 2 on
+const size_t kWorkBudget = 150000;
+
 void compileVariants(const Program &in, const Machine &m, int level, const Flags &fl, const std::string &tag,
                      bool tryK, std::vector<Cand> &out, bool plainOnly = false) {
     Func f;
@@ -298,6 +306,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     std::vector<std::string> texts;
     auto emit = [&](bool pre, bool k, const char *suffix, bool spread = false) -> const Program * {
         if (pre && !passEnabled("preschedule")) return nullptr;
+        if (k && gWorkLimited && gCompileWork > kWorkBudget) return nullptr;
         Func g = f;
         BackendOptions bo;
         bo.preSchedule = pre;
@@ -310,6 +319,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
             c.p = lowerToProgram(g, m, bo);
         }
         if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
+        gCompileWork += c.p.instrCount() * (k ? 3 : 1);
         std::string text = printProgram(c.p);
         for (const std::string &t : texts) if (t == text) return nullptr;
         texts.push_back(text);
@@ -443,6 +453,8 @@ const size_t kSeeds = 5;   // distinct programs seeding the late stages
 
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
+    gCompileWork = 0;
+    gWorkLimited = false;
     const Program canon = canonicalize(orig);
     const Program base = usesUnsupported(canon, m) ? legalize(canon, m) : canon;
     SimProgram so(base);
@@ -582,6 +594,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : p1) quick(c);
         for (Cand &c : p1) cands.push_back(c);
+        gWorkLimited = true;
     }
     // Phase 2: loop rotation and unrolling on the register form of the best
     // phase-1 results, then the whole pipeline again.

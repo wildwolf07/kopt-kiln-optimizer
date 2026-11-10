@@ -219,6 +219,16 @@ selects therefore clear the recorded range of every value they move, and later
 queries recompute it from the operands. (A fuzz case showed a load hoisted out
 of a dead block whose range facts were contradictory.)
 
+Range tables are per function. The interval tables are indexed by one
+function's value numbers, so building a new function empties both of them. A
+stage that rebuilds a program and lowers it without running the range analyses
+then sees no facts (and stays conservative) instead of another function's.
+
+Compile work is bounded without the clock. A meter counts instructions lowered
+(K-name allocations count three times). Phase 1 always runs in full; once
+150,000 units are spent, later stages stop trying K-name allocations. The
+count depends only on the input, so both judge runs give the same file.
+
 ## 6. Profiles
 
 The profile only changes which inputs rank the candidates; it never changes
