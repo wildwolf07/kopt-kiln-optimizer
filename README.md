@@ -31,18 +31,22 @@ pure instruction sinking, source-derived finite-domain specialization, and a
 range-cache lifetime fix. The `optimizer-apex` branch builds on `dac7d75`: large-function lazy
 coalescing and local analysis refresh reduce compile work; backward bit-demand
 proofs and packed lookup alternatives cover additional finite computations.
-This `optimizer-vector` branch adds exact bit-affine synthesis and final
-layout polishing. Other active worktrees are not modified.
+The vector stage adds exact bit-affine synthesis and final layout polishing.
+This `optimizer-stream` branch starts from integrated main `a3e67fe`, preserving
+its later speculation and store rewrites. It adds the previously validated wide
+finite-domain and constant-load splitting candidates, followed by exact rolling
+load reuse with bounded unrolling and scheduling alternatives. Other active
+worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 9,318 | 11.13x |
-| few_registers | 202,164 | 25,592 | 14,679 | 13.77x |
-| no_fused | 107,966 | 20,218 | 11,696 | 9.23x |
-| slow_memory | 111,254 | 24,319 | 13,760 | 8.09x |
-| wide_fast | 55,744 | 12,923 | 7,186 | 7.76x |
+| default | 103,671 | 16,527 | 8,973 | 11.55x |
+| few_registers | 202,164 | 25,592 | 13,978 | 14.46x |
+| no_fused | 107,966 | 20,218 | 10,847 | 9.95x |
+| slow_memory | 111,254 | 24,319 | 13,351 | 8.33x |
+| wide_fast | 55,744 | 12,923 | 6,860 | 8.13x |
 
-Every program/machine pair is checked against the kit on its sample plus 50
+Every program/machine pair is checked against the kit on its sample plus 100
 additional inputs, and optimized twice for determinism. Individual programs can
 get slower; inspect per-program comparisons as well as totals.
 
@@ -53,6 +57,9 @@ Kit-free checks, also available on Ubuntu 22.04/g++ 11 CI:
 ```sh
 python3 tools/smoke.py
 python3 tests/pressure.py
+python3 tests/wide_finite.py --kit-free
+python3 tests/load_rematerialize.py --kit-free
+python3 tests/rolling_load.py --kit-free
 ```
 
 The smoke suite covers arithmetic, loops, guarded division, memory, scratch,
@@ -84,7 +91,6 @@ fixed-seed testing can miss.
 ## Design and diagnostics
 
 [DESIGN.md](DESIGN.md) explains every pass, safety argument and limitation.
-[VIVA.md](VIVA.md) provides a short demonstration and judge questions.
 
 - `KOPT_VERBOSE=1`: candidate cycles and chosen candidate.
 - `KOPT_STRICT=1`: fail on a candidate self-check mismatch.
@@ -119,7 +125,8 @@ See [BENCHMARKS.md](BENCHMARKS.md) for paired results and individual regressions
 Backward scheduling offers a second direction through the existing dependence
 graph. Pure sinking delays single-user expressions without crossing unsafe
 loop boundaries. Finite-domain specialization proves that a pure function
-depends on at most six input bits, exhaustively evaluates that complete domain,
+depends on at most six input bits in the earlier stage or ten in a separate
+final stage, exhaustively evaluates that complete domain,
 and emits a reduced decision graph. It derives every table from the supplied
 program at runtime; it has no stored program answers. [RESEARCH.md](RESEARCH.md)
 records the references, independent adaptations and rejected experiments.
@@ -136,3 +143,15 @@ not guess linearity from sample executions. Unsupported or nonlinear expressions
 retain earlier candidates. `tools/affine_sweep.py` checks complete optimizers on
 independently generated CRC-style and XOR/shift kernels; `tests/bit_affine.py`
 validates the pass directly against the official interpreter.
+
+Rolling memory reuse proves that the next iteration's first read is already
+available from a successful load or store in the preceding iteration. It keeps
+all stores, uses a valid constant-address initial read, and carries the proved
+value through a phi. Unknown aliases, effects, unsupported recurrences and
+complex loop shapes reject. Bounded unrolling and loads-only scheduling follow
+as separate candidates. `tools/rolling_sweep.py` checks generated sorting
+kernels with varied bases, strides and orderings against a baseline executable.
+
+`tools/bench.py --report /tmp/report.json` records full per-case cycle and
+held-out data, compiler CPU time and wall time. CPU diagnostics help distinguish
+contention from compiler work; the contest still enforces wall-clock limits.

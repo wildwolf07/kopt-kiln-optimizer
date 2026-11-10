@@ -54,6 +54,10 @@ bool closedFormLoops(Func &f);     // counted summation loops -> exit values in 
 bool deadScratchStores(Func &f);   // stores to unread constant scratch words
 bool popcountLoops(Func &f);       // bit-counting loops -> SWAR population count
 bool bitAffineFunction(const Program &in, const Machine &m, Program &out);
+bool rematerializeLoads(Func &f);
+bool promoteRollingLoad(Func &f);
+bool finiteInputMasksUpTo(const Program &in, std::vector<uint32_t> &masks, unsigned maxBits);
+std::vector<Program> finiteWideAlternatives(const Program &in);
 bool finiteInputMasks(const Program &in, std::vector<uint32_t> &masks);
 std::vector<Program> finiteAlternatives(const Program &in, bool decision, bool packed);
 bool finitePackedFunction(const Program &in, const Machine &m, Program &out);

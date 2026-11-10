@@ -1,0 +1,72 @@
+[
+  {
+    "name": "adler32",
+    "machine": "slow_memory",
+    "cpu_seconds": 1.320815,
+    "wall_seconds": 1.3437480360153131,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "fib",
+    "machine": "slow_memory",
+    "cpu_seconds": 1.285917,
+    "wall_seconds": 1.316621052013943,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "fib",
+    "machine": "default",
+    "cpu_seconds": 1.2378119999999997,
+    "wall_seconds": 1.2642130049935076,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "fib",
+    "machine": "wide_fast",
+    "cpu_seconds": 1.337539,
+    "wall_seconds": 1.3615079419978429,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "gray_code_sum",
+    "machine": "wide_fast",
+    "cpu_seconds": 1.9502880000000005,
+    "wall_seconds": 1.9860542679962236,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "spill_storm",
+    "machine": "wide_fast",
+    "cpu_seconds": 1.536864000000001,
+    "wall_seconds": 1.5614458369964268,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "alias_stores",
+    "machine": "slow_memory",
+    "cpu_seconds": 1.158850999999999,
+    "wall_seconds": 1.1821156720106956,
+    "peak_child_rss_kib": 20608
+  },
+  {
+    "name": "redundant_loads",
+    "machine": "slow_memory",
+    "cpu_seconds": 1.0706099999999998,
+    "wall_seconds": 1.1083207479969133,
+    "peak_child_rss_kib": 20668
+  },
+  {
+    "name": "stream-big-straight",
+    "machine": "default",
+    "cpu_seconds": 2.947351000000001,
+    "wall_seconds": 2.9935628149833065,
+    "peak_child_rss_kib": 121508
+  },
+  {
+    "name": "stream-big-loops",
+    "machine": "default",
+    "cpu_seconds": 11.324969999999999,
+    "wall_seconds": 11.377036502992269,
+    "peak_child_rss_kib": 190464
+  }
+]

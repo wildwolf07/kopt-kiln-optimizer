@@ -1,0 +1,1728 @@
+{
+  "cases": 60,
+  "accepted": 23,
+  "modes": [
+    0,
+    1,
+    9,
+    11
+  ],
+  "comparisons": 7680,
+  "oracle": "official kirlib (independent)",
+  "source_root": "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-stream/src",
+  "sha256": {
+    "arithmetic.cpp": "2c44a2da7a0565afa6d69a75f95e573c4d945b3097b219b5f4d74378ec77a2b9",
+    "backend.cpp": "489853b2c84c05bd87efcc623b597ddc2033d127fe31c64165cee97a78dd1537",
+    "backend.h": "1187a7306f8aa0eaab27e204b95639c5485d932af54ace49397702a084ab46d1",
+    "bit_affine.cpp": "e5e9db472da39655d606dcac2b30e7c3374094ccbaa471b7b64fc7bc446e8bb2",
+    "cfg.cpp": "ad03d94fc27bf403068d9f6ab8abb52f7c887feae7444e20e98c39683d66ff8c",
+    "cfg.h": "a7c6e3a67eadc1ae4f5520f2fbd3a12894c9eb9815d55eef598e64c8b1cd9a08",
+    "compact.cpp": "9550cbc77c06473166180d9279d4af532de5bc83cfaf4cdfeb3bc90fb34bca43",
+    "finite.cpp": "63ef7759db302ac90b31829fb4d75a0a65810d97a5f1e7398758338e9e58a1c9",
+    "finite_domain.cpp": "9a6cc67b6a6da4e79aed2ad581d3c17b34f35fd7fc7215f51c7aced6748ac707",
+    "ir.h": "772ae5146c00d232a7e95de84c441c9457cfd436f3a268ba0d61fb569caaa45c",
+    "kir.cpp": "14ef22c98672d014106d1be59f3011ed9a1885153066b4bdca42213870d6b993",
+    "kir.h": "3c2fd990347f960a90f155ea9c1c73e77b6884cbc47efdb1bda9121103d411b4",
+    "load_rematerialize.cpp": "edee55f7932a0c804a448dacb2c38d8de7000952fe045aa1f486ee061cd842bb",
+    "loops.cpp": "725f5cf2243bd52268b6b5ff4d35a35b3a5b279b4578ced42e542d1f8f7887e6",
+    "loops.h": "b6d2c29a73c5628f3c0671ef0e8a77e62a49179a06852b4f86cb1d749fc28477",
+    "main.cpp": "53113b5f292681cb8bb3d85b31024bfe774af8bbbde6eb9828c378b2b0f59420",
+    "optimizer.cpp": "922410dfa5cb6f8e6cd764aa84e950c79b5d96e1472bcbec9ddb54bd32be76fe",
+    "optimizer.h": "43401220569148f986fc38e6f86e1089961ee5c6320a6a240c6a01c1277be7a2",
+    "passes.cpp": "0d4b41cdbab1a2a40ac18ee78dc39a619a20baacbed3bfc560cd8db461d25d77",
+    "passes.h": "fc100e58776f3bd9eb7680e1fd6de721a87697c2a660422b5bf9d11861fa1680",
+    "pow2.cpp": "fd4e0893be0b7bceeefa88e00b6babb075008305cc9199e17d8b2122f55bfeb4",
+    "rematerialize.cpp": "1f441899c68d2749ea6e693f2b5b8628bbfa0ff6f844bb21ac230b674c4b694f",
+    "rolling_load.cpp": "d2e7a7d48e31a2753949e4a01081a6f3e288bc6cb2f79ba35ab22c26d24c723f",
+    "sim.cpp": "131a4f11fa7423c695ae5c67732631e2a93146ab0cff905b1d8ba5f84ed53b9c",
+    "sim.h": "f1adec7559859c9233de6247a5c849399a78550fd4a1d925198c0a5b54d3d6a0",
+    "sink.cpp": "07fb4a45c3361c11fac93e7fe1bdd844b5686bd0ecc760e12ec880dfa3e213a1",
+    "ssa.cpp": "002591fde933d6edec44867428fbb2d976c78dfd14b039c108df127f7612880f",
+    "tree_schedule.cpp": "13898f432eae9a679798b78456ea7c41166d56c1e12c6b1c58dc876e700330f2"
+  },
+  "cxx": [
+    "c++"
+  ],
+  "records": [
+    {
+      "case": "load-to-load-raw-zero",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "load-to-load-raw-zero",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "load-to-load-raw-zero",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "load-to-load-raw-zero",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-to-load-raw-zero",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-to-load-raw-zero",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-to-load-raw-zero",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-to-load-raw-zero",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-original-first-value",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-original-first-value",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-original-first-value",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-original-first-value",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-next-from-original-first",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-next-from-original-first",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-next-from-original-first",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "store-next-from-original-first",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-store-wins-over-load",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-store-wins-over-load",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-store-wins-over-load",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-store-wins-over-load",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-load-after-store",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-load-after-store",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-load-after-store",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "latest-load-after-store",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-iv-store-after-known",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-iv-store-after-known",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-iv-store-after-known",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-iv-store-after-known",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-negative-offset-after-known",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-negative-offset-after-known",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-negative-offset-after-known",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "disjoint-negative-offset-after-known",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-before-known",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-before-known",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-before-known",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-before-known",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "same-address-store-before-known",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "same-address-store-before-known",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "same-address-store-before-known",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "same-address-store-before-known",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-load-after-known",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-load-after-known",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-load-after-known",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-load-after-known",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-load",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-load",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-load",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-load",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-store",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-store",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-store",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "step-minus-one-store",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-positive-offset",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-positive-offset",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-positive-offset",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-positive-offset",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-negative-offset",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-negative-offset",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-negative-offset",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "address-negative-offset",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-initial-plus-offset-zero",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-initial-plus-offset-zero",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-initial-plus-offset-zero",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-initial-plus-offset-zero",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-backedge-minus-one",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-backedge-minus-one",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-backedge-minus-one",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrap-backedge-minus-one",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "last-valid-then-trap",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "last-valid-then-trap",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "last-valid-then-trap",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "last-valid-then-trap",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-future-trap",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-future-trap",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-future-trap",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-future-trap",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-later-trap",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-later-trap",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-later-trap",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "partial-stores-before-later-trap",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "scratch-initial-and-next",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "scratch-initial-and-next",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "scratch-initial-and-next",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "scratch-initial-and-next",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-4096",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-4096",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-4096",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-4096",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-minus-one",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-minus-one",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-minus-one",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-initial-minus-one",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-offset-initial",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-offset-initial",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-offset-initial",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "invalid-offset-initial",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-initial",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-initial",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-initial",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-initial",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "raw-const-initial-not-literal",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "raw-const-initial-not-literal",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "raw-const-initial-not-literal",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "raw-const-initial-not-literal",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "literalized-const-initial",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "literalized-const-initial",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "literalized-const-initial",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "literalized-const-initial",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-step",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-step",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-step",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "dynamic-step",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "zero-step",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "zero-step",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "zero-step",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "zero-step",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrong-distance-two",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrong-distance-two",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrong-distance-two",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "wrong-distance-two",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-address",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-address",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-address",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-address",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-next-address",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-next-address",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-next-address",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "non-affine-next-address",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-after-known",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-after-known",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-after-known",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "unknown-store-after-known",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "constant-may-alias-store-after-known",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "constant-may-alias-store-after-known",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "constant-may-alias-store-after-known",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "constant-may-alias-store-after-known",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "opaque-equal-store-after-known",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "opaque-equal-store-after-known",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "opaque-equal-store-after-known",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "opaque-equal-store-after-known",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-store",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-store",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-store",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-store",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-other-load",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-other-load",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-other-load",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "first-effect-other-load",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-load",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-load",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-load",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-load",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-store",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-store",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-store",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-store",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vload",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vload",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vload",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vload",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vload",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vload",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vload",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vload",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vstore",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vstore",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vstore",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-vstore",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vstore",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vstore",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vstore",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-vstore",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-variable",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-variable",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-variable",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-variable",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-variable",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-variable",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-variable",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-variable",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-variable",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-variable",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-variable",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-variable",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-variable",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-variable",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-variable",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-variable",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-nonzero",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-nonzero",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-nonzero",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-div-nonzero",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-nonzero",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-nonzero",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-nonzero",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-div-nonzero",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-nonzero",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-nonzero",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-nonzero",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-after-mod-nonzero",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-nonzero",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-nonzero",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-nonzero",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-before-mod-nonzero",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-div",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-div",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-div",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-div",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-volatile",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-volatile",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-volatile",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "header-volatile",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "body-explicit-trap",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=0"
+    },
+    {
+      "case": "body-explicit-trap",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=0"
+    },
+    {
+      "case": "body-explicit-trap",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=0"
+    },
+    {
+      "case": "body-explicit-trap",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=1"
+    },
+    {
+      "case": "three-block-loop",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "three-block-loop",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "three-block-loop",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "three-block-loop",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "cross-entry-into-body",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "cross-entry-into-body",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "cross-entry-into-body",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "cross-entry-into-body",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "predecessor-sibling-exit",
+      "mode": 0,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "predecessor-sibling-exit",
+      "mode": 1,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "predecessor-sibling-exit",
+      "mode": 9,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "predecessor-sibling-exit",
+      "mode": 11,
+      "promoted": true,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "sibling-exit-invalid-initial",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "sibling-exit-invalid-initial",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "sibling-exit-invalid-initial",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "sibling-exit-invalid-initial",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": true,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "multiple-outside-predecessors",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "multiple-outside-predecessors",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "multiple-outside-predecessors",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "multiple-outside-predecessors",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=0 spill=0"
+    },
+    {
+      "case": "nonloop-reject-safe-scratch",
+      "mode": 0,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=0"
+    },
+    {
+      "case": "nonloop-reject-safe-scratch",
+      "mode": 1,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=0"
+    },
+    {
+      "case": "nonloop-reject-safe-scratch",
+      "mode": 9,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=0"
+    },
+    {
+      "case": "nonloop-reject-safe-scratch",
+      "mode": 11,
+      "promoted": false,
+      "literal_setup": false,
+      "backend": "scratch=1 spill=1"
+    }
+  ]
+}

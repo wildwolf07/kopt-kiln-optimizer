@@ -32,5 +32,17 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/bit_affine.py --kit-free
+      - name: Check wide finite-domain proofs and budgets
+        env:
+          CXX: g++-11
+        run: python3 tests/wide_finite.py --kit-free
+      - name: Check constant-load splitting safety gates
+        env:
+          CXX: g++-11
+        run: python3 tests/load_rematerialize.py --kit-free
+      - name: Check rolling memory reuse and trap boundaries
+        env:
+          CXX: g++-11
+        run: python3 tests/rolling_load.py --kit-free
       - name: Check dense-live-set limits with an independent arithmetic oracle
         run: python3 tests/pressure.py

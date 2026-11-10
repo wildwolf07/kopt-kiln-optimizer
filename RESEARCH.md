@@ -119,3 +119,26 @@ those late decision graphs previously missed the earlier layout stage. Six
 bounded alternatives preserve every prior seed/candidate; the exact timing
 model chooses among them. Some sample inputs regress by one to three cycles,
 so both paired held-out scoring and unseen-machine comparisons are retained.
+
+The stream stage uses independently implemented distance-one memory reuse,
+related to [predictive commoning](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html#index-fpredictive-commoning).
+The proof is an induction over completed loop iterations: a successful prior
+access to exactly the next address supplies the value and guarantees that
+address is valid. Same-IV offsets differ modulo 2^32; unknown address forms
+reject. A valid constant initial read covers entry and zero-trip behavior.
+Stores remain in order, including those visible if a subsequent access traps.
+Pure headers and prefixes exclude writes between the supplied value and its use.
+No external optimizer implementation was copied.
+
+The independently measured alternatives first make stores branch-free, then
+promote one carried memory value and try bounded unrolling and loads-only
+scheduling. Keeping the memory value in one phi can be better than retaining
+many prefetched loads in a small register file. Every prior candidate remains.
+Domains of seven through ten input bits and valid constant-load splitting are
+ported from the validated `optimizer-resolve` candidate; their proofs are
+unchanged. Source/step/code budgets remain deterministic.
+
+A pure guard-chain fusion experiment was deferred: 500 paired public cases had
+no regressions but saved only two sample cycles in total. Twenty raw-seed
+reoptimization trials established no further gain; wide-fast merging worsened.
+This experiment is absent from production.

@@ -17,6 +17,7 @@ import glob
 import math
 import multiprocessing as mp
 import os
+import resource
 import subprocess
 import sys
 import tempfile
@@ -73,8 +74,11 @@ def check_one(job):
     sample = K.load_input(inpath, len(orig.params))
     with tempfile.TemporaryDirectory() as td:
         out = os.path.join(td, "out.kir")
+        before = resource.getrusage(resource.RUSAGE_CHILDREN)
         dt, err = run_kopt(src, machine, prof, out, identity, timeout)
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
         row["kopt_s"] = dt
+        row["kopt_cpu_s"] = after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime
         if err:
             row["err"] = err
             return row
@@ -137,6 +141,7 @@ def main():
     ap.add_argument("--dir", default=None, help="folder of .kir/.in files (default: kit bench/)")
     ap.add_argument("-v", "--verbose", action="store_true", help="print every row")
     ap.add_argument("--save", default=None, help="write per-program cycles to this JSON file")
+    ap.add_argument("--report", help="write full rows including held-out cycles, CPU time and wall time")
     ap.add_argument("--compare", default=None, help="show differences against a saved JSON file")
     a = ap.parse_args()
     if a.score_offset < 0:
@@ -182,6 +187,12 @@ def main():
         import json
         with open(a.save, "w") as f:
             json.dump({"%s|%s" % (r["name"], r["machine"]): r["c1"] for r in good}, f, indent=0, sort_keys=True)
+    if a.report:
+        import json
+        with open(a.report, "w") as f:
+            json.dump({"seed": a.seed, "score_offset": a.score_offset,
+                       "additional_inputs": a.random, "rows": rows}, f, indent=2)
+            f.write("\n")
     if a.compare:
         import json
         with open(a.compare) as f:
@@ -200,6 +211,8 @@ def main():
             if d[0] > 0:
                 print("  %-36s %7d -> %7d (%+d)" % (d[1], d[2], d[3], d[0]))
     slow = max((r.get("kopt_s", 0) for r in rows), default=0)
+    cpu = max((r.get("kopt_cpu_s", 0) for r in rows), default=0)
+    print("Slowest compiler CPU %.3fs (diagnostic; wall time remains the execution limit)" % cpu)
     print("\n%d/%d passed, %d failed, slowest kopt %.2fs, wall %.1fs" % (
         len(good), len(rows), len(fails), slow, time.time() - t0))
     sys.exit(1 if fails else 0)

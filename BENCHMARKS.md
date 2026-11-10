@@ -1,3 +1,100 @@
+# optimizer-stream validation
+
+Based on main `a3e67fe`, in its own branch and worktree. Adds exact rolling
+load reuse and bounded follow-up alternatives, and ports the independently
+validated wide finite-domain and constant-load splitting candidates from
+`optimizer-resolve` (`f4b615f`). Main and other active worktrees were not edited.
+
+| Machine | Main sample | Stream sample | Main held-out | Stream held-out | Main held-out geo | Stream held-out geo |
+|---|---:|---:|---:|---:|---:|---:|
+| default | 9,318 | 8,973 | 54,471 | 52,610 | 7.293 | 7.453 |
+| few_registers | 14,679 | 13,978 | 87,708 | 84,004 | 10.932 | 11.236 |
+| no_fused | 11,696 | 10,847 | 67,537 | 63,098 | 6.594 | 6.798 |
+| slow_memory | 13,760 | 13,351 | 82,440 | 80,350 | 6.364 | 6.505 |
+| wide_fast | 7,186 | 6,860 | 41,241 | 39,442 | 5.191 | 5.295 |
+
+500 program/machine pairs passed sample plus 30 generated-input checks,
+feature validation and repeat-output determinism. A second paired campaign
+against separately built main passed sample plus 100 generated inputs, strict
+candidate checks and repeat determinism. Held-out scoring uses eight generated
+inputs starting after offset 40, skipping the fixed edge prefix. Both sample
+and held-out comparisons have 12 faster pairs, 488 ties and zero regressions.
+These public measurements do not establish a hidden-test score.
+
+The new rolling stage's sample wins over the ported baseline include:
+
+| Kernel | Machine | Before | After |
+|---|---|---:|---:|
+| bubble sort | wide_fast | 407 | 289 |
+| bubble sort | no_fused | 692 | 647 |
+| stencil3 | default | 174 | 165 |
+| stencil3 | no_fused | 193 | 168 |
+| stencil3 | slow_memory | 301 | 253 |
+| alias stores | default | 184 | 171 |
+
+The ported wide specialization removes most of the divisor-count loop cost,
+and constant-load splitting improves slow-memory matrix multiplication.
+Earlier candidates and all earlier seed trajectories stay available.
+
+Eight independently generated sorting kernels vary base address, stride and
+comparison direction. Forty pairs across five machines passed sample plus 100
+inputs and repeat determinism. Fourteen improve and 26 tie on both sample and
+held-out totals; none regress. Aggregate results:
+
+| Machine | Sample before → after | Held-out before → after |
+|---|---:|---:|
+| default | 7,825 → 7,825 | 61,050 → 61,050 |
+| few_registers | 11,225 → 11,225 | 87,091 → 87,091 |
+| no_fused | 9,149 → 8,311 | 71,386 → 64,721 |
+| slow_memory | 12,817 → 12,817 | 99,706 → 99,706 |
+| wide_fast | 6,653 → 4,280 | 52,171 → 33,479 |
+
+Reproduce with:
+
+```sh
+python3 tools/bench.py --machines all --random 30 --score-offset 40 \
+  --timeout 180 --jobs 3 --report /tmp/report.json
+python3 tools/rolling_sweep.py --baseline /path/to/main/kopt --candidate ./kopt \
+  --cases 8 --seed 2215 --save /tmp/generated.json
+```
+
+Frozen validation passed: 3,000 strict-mode fuzz programs (seed 2211), 500
+metamorphic programs (seed 2212), 300 ASan/UBSan fuzz programs (seed 2214),
+44 saved regressions, 100 mutation cases with identical cycle totals, and
+50 smoke pairs plus four negative controls. The 1,200 unseen-machine cases
+report zero outputs slower than the input and zero wrapper fallbacks.
+
+All 16 other root test suites passed against unchanged source hashes,
+including 87,620 integrated counted-loop comparisons over 6,326 dumped
+candidates. The added rolling suite passed 60 proof/CFG/effect fixtures,
+23 promotions and 37 rejections under four backend modes, with 7,680 independent
+official comparisons. It checks exact store preservation, phi structure, valid
+SSA, repeat determinism and scratch restrictions. Kit-free mode also passed
+7,680 local-interpreter comparisons under ASan/UBSan. An additional full-pipeline
+check ran 20 strict compilations and compared all 852 emitted rolling candidates
+against the original on 100 inputs each: 85,200 independent official comparisons,
+including partial stores followed by invalid-address traps, all passed. Local-interpreter checks
+complement the independent official oracle; they are not independent evidence.
+
+The full 500-pair parallel report measured maximum compiler CPU time 0.982 s
+on the Mac. Some wall times exceeded five seconds during concurrent work
+(maximum 5.72 s), so CPU diagnostics are recorded separately. The strict C++17
+Linux build was also tested with one pinned VM CPU: the eight slowest Mac
+program/machine cases completed in 1.11–1.99 s wall time, with 1.07–1.95 s CPU.
+Generated ~100k-instruction straight/loop inputs completed in 2.99/11.38 s wall
+(2.95/11.32 s CPU), with approximately 119/186 MiB peak child RSS. Eight independent official comparisons of both Linux-built large-program
+outputs also passed. The contest
+uses wall-clock limits; these local measurements do not predict its CPU speed.
+
+Pure guard-chain fusion was evaluated separately and deferred: the initial
+500-pair experiment saved only two sample cycles; twenty raw-seed trials
+established no further gain. That module is absent from production.
+
+Full per-case results, source hashes, test logs' summaries and generated timing
+results are in `results/stream-*.json`. Kit folders and binaries are not bundled.
+
+---
+
 # optimizer-vector validation
 
 Isolated branch based on `optimizer-apex` (`0683c43`). Adds an exact symbolic

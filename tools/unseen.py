@@ -2,7 +2,7 @@
 """unseen.py - kopt on 12 random machine files (extreme widths, latencies,
 register counts, caches, with or without fused ops) x 100 practice programs.
 Reports outputs slower than the input, wrapper fallbacks and the slowest run."""
-import os, sys, random, subprocess, glob, time, tempfile, multiprocessing as mp
+import os, sys, random, subprocess, glob, time, tempfile, multiprocessing as mp, argparse
 KIT=os.path.abspath('../official-LLH-26/Compilers/COMP10'); sys.path.insert(0,KIT)
 import kirlib as K
 def rm(seed):
@@ -23,9 +23,13 @@ def job(a):
             cp=K.compile_program(pr); r=K.execute(cp,inp.args,inp.segments,inp.vin,5000000,True); return K.time_trace(cp,r.trace,mc)
         return (seed,name,cyc(o),cyc(n),dt,'fallback' in p.stderr)
 if __name__=='__main__':
+  parser=argparse.ArgumentParser(description=__doc__)
+  parser.add_argument('--jobs',type=int,default=10)
+  a=parser.parse_args()
+  if a.jobs<1: parser.error('jobs must be positive')
   srcs=sorted(glob.glob(KIT+'/bench/*.kir'))
   jobs=[(s,f) for s in range(12) for f in srcs]
-  with mp.Pool(10) as pool: res=pool.map(job,jobs)
+  with mp.Pool(a.jobs) as pool: res=pool.map(job,jobs)
   worse=[r for r in res if r[3]>r[2]]; slow=max(r[4] for r in res); fb=[r for r in res if r[5]]
   print("cases",len(res),"worse_than_input",len(worse),"fallbacks",len(fb),"max_time %.2f"%slow)
   for r in sorted(worse,key=lambda r:r[2]-r[3])[:12]: print("WORSE m%d %s %d -> %d"%(r[0],r[1],r[2],r[3]))

@@ -114,14 +114,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--machine", default="default")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--jobs", type=int, default=os.cpu_count())
     ap.add_argument("names", nargs="*")
     a = ap.parse_args()
+    if a.jobs < 1:
+        ap.error("jobs must be positive")
     machine = os.path.join(KIT, "machines", "machine_%s.cfg" % a.machine)
     names = a.names or sorted(os.path.basename(p)[:-4] for p in glob.glob(os.path.join(KIT, "bench", "*.kir")))
     t1 = t2 = 0
     bad = 0
     worse = []
-    with mp.Pool(os.cpu_count()) as pool:
+    with mp.Pool(a.jobs) as pool:
         for name, kind, info in pool.imap_unordered(one, [(n, machine, a.seed) for n in names]):
             if kind != "OK":
                 bad += 1

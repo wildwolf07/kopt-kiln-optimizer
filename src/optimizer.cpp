@@ -1013,6 +1013,108 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         }
     }
+    if (progSize <= 1000 && !dense && passEnabled("widefinite")) {
+        auto programs = finiteWideAlternatives(base);
+        for (size_t i = 0; i < programs.size(); i++) {
+            Cand c; c.p = std::move(programs[i]); c.what = "wide-table" + std::to_string(i);
+            quick(c); cands.push_back(std::move(c));
+        }
+    }
+    // Final-only load splitting; preserve every earlier candidate and seed set.
+    if (effort == 2 && passEnabled("loadremat")) {
+        const auto seeds = bestDistinct(cands, 3);
+        std::vector<Cand> split;
+        size_t work = 0;
+        for (const Cand *seed : seeds) {
+            if (seed->p.instrCount() > 500 || work + 4 * seed->p.instrCount() > 2000) continue;
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f); simplifyCFG(f);
+            if (!rematerializeLoads(f)) continue;
+            size_t size = 0;
+            for (const BB &b : f.bb) if (b.alive) size += b.insts.size();
+            if (size > 500 || work + 4 * size > 2000) continue;
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; mode++) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f; BackendOptions bo;
+                bo.preSchedule = mode != 0; bo.bottomUpSchedule = mode >= 2;
+                bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = seed->what + "/loadremat" + std::to_string(mode); c.flags = seed->flags;
+                quick(c); split.push_back(std::move(c));
+                work += size;
+            }
+        }
+        for (Cand &c : split) cands.push_back(std::move(c));
+    }
+    // Distance-one memory reuse is prepared before this stage's own unrolling,
+    // independently of every earlier candidate/seed trajectory.
+    if (effort == 2 && progSize <= 500 && passEnabled("rolling")) {
+        Func f; std::string err;
+        if (buildSSA(base, f, err)) {
+            Flags prepare; prepare.loadPhis = true; prepare.storeSel = true; prepare.reassoc = false;
+            runPipeline(f, m, opt.maxLevel, prepare);
+            for (int r = 0; r < 4; ++r) {
+                bool changed = storeSelect(f); changed |= mergeArmStores(f); changed |= ifConvert(f, m);
+                instSimplify(f); dce(f); simplifyCFG(f);
+                if (!changed) break;
+            }
+            int promoted = 0;
+            for (int r = 0; r < 4 && promoteRollingLoad(f); ++r) ++promoted;
+            if (promoted) {
+                Func copy = f; BackendOptions initial;
+                const Program seed = lowerToProgram(copy, m, initial);
+                size_t work = 0;
+                const size_t workCap = 6000;
+                auto emit = [&](Func &ir, const Flags &fl, const std::string &tag, std::vector<Cand> &out) {
+                    size_t units = 0;
+                    for (const BB &b : ir.bb) if (b.alive) {
+                        units += b.insts.size();
+                        for (const Phi &ph : b.phis) units += ph.in.size();
+                    }
+                    if (units > 1000) return;
+                    const bool scratch = canSpillToScratch(ir);
+                    for (int mode = 0; mode < 4; ++mode) {
+                        if (mode == 3 && !scratch) continue;
+                        const size_t cost = units * (mode == 3 ? 3 : 1);
+                        if (work + cost > workCap) continue;
+                        work += cost;
+                        Func g = ir; BackendOptions bo;
+                        bo.preSchedule = mode != 0; bo.spreadColors = mode == 2; bo.spillToK = mode == 3;
+                        Cand c; c.p = lowerToProgram(g, m, bo); c.what = tag + "/" + std::to_string(mode); c.flags = fl;
+                        quick(c); out.push_back(std::move(c));
+                    }
+                };
+                std::vector<Cand> rolling;
+                for (int factor : {1, 2, 4, 8}) {
+                    Program p = seed;
+                    if (factor > 1) {
+                        std::vector<uint32_t> names; Func rf = toRegisterForm(seed, names);
+                        rotateLoops(rf, 8);
+                        if (!unrollLoops(rf, factor, 500)) continue;
+                        p = fromRegisterForm(rf, names);
+                    }
+                    if (p.instrCount() > 500 || work >= workCap) continue;
+                    Func ir; if (!buildSSA(p, ir, err)) continue;
+                    Flags fl; runPipeline(ir, m, opt.maxLevel, fl);
+                    const std::string tag = "rolling" + std::to_string(factor);
+                    std::vector<Cand> group; emit(ir, fl, tag, group);
+                    const auto best = bestDistinct(group, 2);
+                    std::vector<Cand> advanced;
+                    for (const Cand *c : best) {
+                        Func next; if (work >= workCap || !buildSSA(c->p, next, err)) continue;
+                        Flags spec; spec.speculate = true; spec.specLoadsOnly = true;
+                        runPipeline(next, m, opt.maxLevel, spec);
+                        emit(next, spec, c->what + "/prefetch", advanced);
+                    }
+                    for (Cand &c : group) rolling.push_back(std::move(c));
+                    for (Cand &c : advanced) rolling.push_back(std::move(c));
+                }
+                for (Cand &c : rolling) cands.push_back(std::move(c));
+            }
+        }
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

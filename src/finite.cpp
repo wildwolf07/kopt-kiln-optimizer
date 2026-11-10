@@ -20,7 +20,7 @@ struct FiniteDomain {
     std::vector<uint32_t> table;
 };
 
-bool evaluateFinite(const Program &original, FiniteDomain &domain) {
+bool evaluateFinite(const Program &original, FiniteDomain &domain, unsigned maxBits = 6, unsigned minBits = 0) {
     // Bound SSA construction separately from the exhaustive interpreter work.
     if (original.blocks.empty() || original.blocks.size() > 256 ||
         original.params.size() > 8 || original.instrCount() > 8000) return false;
@@ -28,7 +28,7 @@ bool evaluateFinite(const Program &original, FiniteDomain &domain) {
         if (isMemOp(x.op) || x.op == OP_TRAP) return false;
 
     std::vector<uint32_t> masks;
-    if (!finiteInputMasks(original, masks)) return false;
+    if (!finiteInputMasksUpTo(original, masks, maxBits)) return false;
 
     // Exact backward bit-demand analysis proves projected-input equivalence.
     // Exhaustive evaluation below establishes totality and every table value.
@@ -36,9 +36,10 @@ bool evaluateFinite(const Program &original, FiniteDomain &domain) {
     for (size_t p = 0; p < masks.size(); p++) for (unsigned b = 0; b < 32; b++)
         if ((masks[p] & (uint32_t{1} << b)) != 0) {
             bits.push_back({p, uint32_t{1} << b});
-            if (bits.size() > 6) return false;
+            if (bits.size() > maxBits) return false;
         }
 
+    if (bits.size() < minBits) return false;
     const SimProgram sim(original);
     std::vector<uint32_t> &table = domain.table;
     table.resize(size_t{1} << bits.size());
@@ -61,7 +62,7 @@ bool emitDecision(const Program &original, const FiniteDomain &domain, Program &
     const auto &bits = domain.bits;
     const auto &table = domain.table;
 
-    // At most 127 nodes / recursion depth 6. Equal leaves and equal decision
+    // At most 2047 nodes / recursion depth 10 (127 / 6 in the default mode). Equal leaves and equal decision
     // subtables are shared; tests whose two branches agree disappear entirely.
     std::vector<FiniteNode> nodes;
     std::map<uint32_t, int> leaves;
@@ -145,7 +146,7 @@ bool emitDecision(const Program &original, const FiniteDomain &domain, Program &
 
 // Alternative only: caller retains the BDD/original candidates and measures.
 // Three low scratch names suffice; no original parameter is ever overwritten.
-bool emitPacked(const Program &original, const FiniteDomain &domain, Program &out) {
+bool emitPacked(const Program &original, const FiniteDomain &domain, Program &out, size_t maxWords = 16) {
     const auto &bits = domain.bits;
     const auto &table = domain.table;
     const auto bounds = std::minmax_element(table.begin(), table.end());
@@ -161,7 +162,7 @@ bool emitPacked(const Program &original, const FiniteDomain &domain, Program &ou
     const uint32_t base = fieldWidth(maximum) == width ? 0 : minimum;
     const unsigned entries = 32 / width;
     const size_t wordCount = (table.size() + entries - 1) / entries;
-    if (wordCount > 16) return false;
+    if (wordCount > maxWords) return false;
     std::vector<uint32_t> words(wordCount, 0);
     for (size_t i = 0; i < table.size(); i++)
         words[i / entries] |= (table[i] - base) << ((i % entries) * width);
@@ -195,7 +196,7 @@ bool emitPacked(const Program &original, const FiniteDomain &domain, Program &ou
 
     // Select a constant word with the HIGH key bits. Reading their original
     // parameter bits directly is exactly the same key assignment as the BDD.
-    // At most 16 words / depth 4; equal words/subtables share one node.
+    // At most 64 words / depth 6 in the wide alternative; equal words/subtables share one node.
     std::vector<FiniteNode> nodes;
     std::map<std::tuple<int, int, int>, int> decisions;
     std::map<uint32_t, int> leaves;
@@ -308,6 +309,32 @@ std::vector<Program> finiteAlternatives(const Program &original, bool decision, 
     Program p;
     if (decision && emitDecision(original, domain, p)) programs.push_back(std::move(p));
     if (packed && emitPacked(original, domain, p)) programs.push_back(std::move(p));
+    return programs;
+}
+
+// A separate, final-only alternative: earlier six-bit candidates and seed
+// trajectories are unchanged. One exhaustive evaluation is shared by all
+// representations. The exact input proof and step budgets are unchanged.
+std::vector<Program> finiteWideAlternatives(const Program &original) {
+    std::vector<Program> programs;
+    FiniteDomain domain;
+    if (!evaluateFinite(original, domain, 10, 7)) return programs;
+    auto emit = [&](const FiniteDomain &d) {
+        Program p;
+        if (emitDecision(original, d, p) && p.instrCount() <= 1024) programs.push_back(std::move(p));
+        if (emitPacked(original, d, p, 64) && p.instrCount() <= 1024) programs.push_back(std::move(p));
+    };
+    emit(domain);
+    FiniteDomain reverse;
+    reverse.bits.assign(domain.bits.rbegin(), domain.bits.rend());
+    reverse.table.resize(domain.table.size());
+    for (size_t key = 0; key < reverse.table.size(); key++) {
+        size_t old = 0;
+        for (size_t b = 0; b < domain.bits.size(); b++)
+            if ((key >> b) & 1u) old |= size_t{1} << (domain.bits.size() - 1 - b);
+        reverse.table[key] = domain.table[old];
+    }
+    emit(reverse);
     return programs;
 }
 
