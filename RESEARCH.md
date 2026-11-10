@@ -119,3 +119,24 @@ those late decision graphs previously missed the earlier layout stage. Six
 bounded alternatives preserve every prior seed/candidate; the exact timing
 model chooses among them. Some sample inputs regress by one to three cycles,
 so both paired held-out scoring and unseen-machine comparisons are retained.
+
+The resolve stage expands only the proved finite input domain, to seven through
+ten demanded bits. It keeps the same per-case and aggregate interpretation
+budgets, emits at most 1,024 instructions per representation, and tries forward
+and reversed variable orders. Neither ordering is claimed optimal. Reversing
+both the key bits and table indices preserves the represented function. The
+six-bit stage and all earlier candidate trajectories remain unchanged.
+
+A separate full-corpus cost breakdown on integrated main identified matrix
+multiplication's long-lived loaded values and sieve's branch fences as remaining
+weak areas. Constant-address load rematerialization is being investigated
+separately; the resolve finite-domain change does not alter memory scheduling.
+
+For the remaining loaded-value pressure, Briggs, Cooper and Torczon,
+[Rematerialization (PLDI 1992)](https://doi.org/10.1145/143095.143143),
+describes the recomputation-versus-spilling tradeoff. LLVM's public
+[MachineInstr movement predicates](https://llvm.org/doxygen/MachineInstr_8cpp_source.html)
+provide context for memory-order restrictions. These are conceptual references;
+no external implementation is incorporated. In Kiln, any load cloning needs an
+independent valid-address proof and a proof of no intervening aliasing write;
+a measured spill improvement can still lose to extra load/cache cost.

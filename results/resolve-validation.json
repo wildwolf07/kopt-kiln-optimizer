@@ -1,0 +1,104 @@
+{
+  "branch": "optimizer-resolve",
+  "baseline": "daac25e",
+  "production_sha256": {
+    "src/arithmetic.cpp": "2c44a2da7a0565afa6d69a75f95e573c4d945b3097b219b5f4d74378ec77a2b9",
+    "src/backend.cpp": "489853b2c84c05bd87efcc623b597ddc2033d127fe31c64165cee97a78dd1537",
+    "src/backend.h": "1187a7306f8aa0eaab27e204b95639c5485d932af54ace49397702a084ab46d1",
+    "src/bit_affine.cpp": "e5e9db472da39655d606dcac2b30e7c3374094ccbaa471b7b64fc7bc446e8bb2",
+    "src/cfg.cpp": "ad03d94fc27bf403068d9f6ab8abb52f7c887feae7444e20e98c39683d66ff8c",
+    "src/cfg.h": "a7c6e3a67eadc1ae4f5520f2fbd3a12894c9eb9815d55eef598e64c8b1cd9a08",
+    "src/compact.cpp": "9550cbc77c06473166180d9279d4af532de5bc83cfaf4cdfeb3bc90fb34bca43",
+    "src/finite.cpp": "63ef7759db302ac90b31829fb4d75a0a65810d97a5f1e7398758338e9e58a1c9",
+    "src/finite_domain.cpp": "9a6cc67b6a6da4e79aed2ad581d3c17b34f35fd7fc7215f51c7aced6748ac707",
+    "src/ir.h": "772ae5146c00d232a7e95de84c441c9457cfd436f3a268ba0d61fb569caaa45c",
+    "src/kir.cpp": "14ef22c98672d014106d1be59f3011ed9a1885153066b4bdca42213870d6b993",
+    "src/kir.h": "3c2fd990347f960a90f155ea9c1c73e77b6884cbc47efdb1bda9121103d411b4",
+    "src/loops.cpp": "725f5cf2243bd52268b6b5ff4d35a35b3a5b279b4578ced42e542d1f8f7887e6",
+    "src/loops.h": "b6d2c29a73c5628f3c0671ef0e8a77e62a49179a06852b4f86cb1d749fc28477",
+    "src/main.cpp": "53113b5f292681cb8bb3d85b31024bfe774af8bbbde6eb9828c378b2b0f59420",
+    "src/optimizer.cpp": "f50cb145d5e8510c5f84724f5236abebc87ae73db215c6060be9fd5d02245bd7",
+    "src/optimizer.h": "43401220569148f986fc38e6f86e1089961ee5c6320a6a240c6a01c1277be7a2",
+    "src/passes.cpp": "4028e029627c1fddf5cbdd8d23bc7626eefe18f57fbf24034d6880df216bd169",
+    "src/passes.h": "7f411bf271ac1a41ca6c7c363ab00288067f552eaf5be7942a1a7c7be822cb2f",
+    "src/pow2.cpp": "fd4e0893be0b7bceeefa88e00b6babb075008305cc9199e17d8b2122f55bfeb4",
+    "src/rematerialize.cpp": "1f441899c68d2749ea6e693f2b5b8628bbfa0ff6f844bb21ac230b674c4b694f",
+    "src/sim.cpp": "131a4f11fa7423c695ae5c67732631e2a93146ab0cff905b1d8ba5f84ed53b9c",
+    "src/sim.h": "f1adec7559859c9233de6247a5c849399a78550fd4a1d925198c0a5b54d3d6a0",
+    "src/sink.cpp": "07fb4a45c3361c11fac93e7fe1bdd844b5686bd0ecc760e12ec880dfa3e213a1",
+    "src/ssa.cpp": "002591fde933d6edec44867428fbb2d976c78dfd14b039c108df127f7612880f",
+    "src/tree_schedule.cpp": "13898f432eae9a679798b78456ea7c41166d56c1e12c6b1c58dc876e700330f2"
+  },
+  "binary_sha256": "add541a807f38846dc3a3f57539e060e60001ed25fa9ddf2feaa61a3480ada6d",
+  "checks": {
+    "benchmark_pairs": 500,
+    "benchmark_additional_inputs_per_pair": 100,
+    "benchmark_score_offset": 40,
+    "benchmark_seed": 12345,
+    "fuzz": {
+      "count": 2500,
+      "seed": 2111,
+      "failures": 0
+    },
+    "metamorphic": {
+      "count": 1000,
+      "seed": 2112,
+      "failures": 0
+    },
+    "regressions": 42,
+    "sanitizer_fuzz": {
+      "count": 300,
+      "seed": 2114,
+      "failures": 0
+    },
+    "generated_recurrence_pairs": 60,
+    "generated_recurrence_seed": 2115,
+    "generated_machine_pairs": 400,
+    "generated_machine_seed": 2113,
+    "direct_official": 41792,
+    "direct_kit_free": 38912,
+    "direct_kit_free_asan_ubsan": 38912,
+    "linux_output_official": 2560,
+    "smoke_pairs": 50,
+    "negative_controls": 4,
+    "legacy_bit_demand_gates": 43,
+    "dense_pressure_values": [
+      900,
+      2000,
+      15000
+    ],
+    "strict_linux_cpp17_build": true
+  },
+  "linux_compile_seconds": [
+    {
+      "machine": "default",
+      "seconds": 0.5467776670120656
+    },
+    {
+      "machine": "few_registers",
+      "seconds": 0.45374037997680716
+    },
+    {
+      "machine": "no_fused",
+      "seconds": 0.4650687309913337
+    },
+    {
+      "machine": "slow_memory",
+      "seconds": 0.774495923978975
+    },
+    {
+      "machine": "wide_fast",
+      "seconds": 0.6631412879796699
+    }
+  ],
+  "linux_100k": {
+    "straight": {
+      "seconds": 2.5,
+      "maxrss_kib": 118876
+    },
+    "loops": {
+      "seconds": 8.26,
+      "maxrss_kib": 190424
+    }
+  }
+}

@@ -31,18 +31,19 @@ pure instruction sinking, source-derived finite-domain specialization, and a
 range-cache lifetime fix. The `optimizer-apex` branch builds on `dac7d75`: large-function lazy
 coalescing and local analysis refresh reduce compile work; backward bit-demand
 proofs and packed lookup alternatives cover additional finite computations.
-This `optimizer-vector` branch adds exact bit-affine synthesis and final
-layout polishing. Other active worktrees are not modified.
+The vector stage adds exact bit-affine synthesis and final
+layout polishing. This `optimizer-resolve` branch starts from integrated main
+`daac25e` and adds bounded seven-to-ten-bit finite specialization. Other active worktrees are not modified.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 9,758 | 10.62x |
-| few_registers | 202,164 | 25,592 | 14,999 | 13.48x |
-| no_fused | 107,966 | 20,218 | 12,186 | 8.86x |
-| slow_memory | 111,254 | 24,319 | 13,977 | 7.96x |
-| wide_fast | 55,744 | 12,923 | 7,270 | 7.67x |
+| default | 103,671 | 16,527 | 9,431 | 10.99x |
+| few_registers | 202,164 | 25,592 | 14,298 | 14.14x |
+| no_fused | 107,966 | 20,218 | 11,407 | 9.46x |
+| slow_memory | 111,254 | 24,319 | 13,648 | 8.15x |
+| wide_fast | 55,744 | 12,923 | 7,062 | 7.89x |
 
-Every program/machine pair is checked against the kit on its sample plus 50
+Every program/machine pair is checked against the kit on its sample plus 100
 additional inputs, and optimized twice for determinism. Individual programs can
 get slower; inspect per-program comparisons as well as totals.
 
@@ -53,6 +54,7 @@ Kit-free checks, also available on Ubuntu 22.04/g++ 11 CI:
 ```sh
 python3 tools/smoke.py
 python3 tests/pressure.py
+python3 tests/wide_finite.py --kit-free
 ```
 
 The smoke suite covers arithmetic, loops, guarded division, memory, scratch,
@@ -84,7 +86,6 @@ fixed-seed testing can miss.
 ## Design and diagnostics
 
 [DESIGN.md](DESIGN.md) explains every pass, safety argument and limitation.
-[VIVA.md](VIVA.md) provides a short demonstration and judge questions.
 
 - `KOPT_VERBOSE=1`: candidate cycles and chosen candidate.
 - `KOPT_STRICT=1`: fail on a candidate self-check mismatch.
@@ -119,7 +120,8 @@ See [BENCHMARKS.md](BENCHMARKS.md) for paired results and individual regressions
 Backward scheduling offers a second direction through the existing dependence
 graph. Pure sinking delays single-user expressions without crossing unsafe
 loop boundaries. Finite-domain specialization proves that a pure function
-depends on at most six input bits, exhaustively evaluates that complete domain,
+depends on at most six input bits in the original stage or ten in the final
+wide stage, exhaustively evaluates that complete domain,
 and emits a reduced decision graph. It derives every table from the supplied
 program at runtime; it has no stored program answers. [RESEARCH.md](RESEARCH.md)
 records the references, independent adaptations and rejected experiments.

@@ -1,0 +1,445 @@
+{
+  "source_root": "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-resolve/src",
+  "hashes": {
+    "finite.cpp": "63ef7759db302ac90b31829fb4d75a0a65810d97a5f1e7398758338e9e58a1c9",
+    "finite_domain.cpp": "9a6cc67b6a6da4e79aed2ad581d3c17b34f35fd7fc7215f51c7aced6748ac707",
+    "passes.h": "7f411bf271ac1a41ca6c7c363ab00288067f552eaf5be7942a1a7c7be822cb2f"
+  },
+  "comparisons": 41792,
+  "candidates": 36,
+  "legacy_cases": 41,
+  "rows": [
+    {
+      "case": "high-7",
+      "index": 0,
+      "instructions": 39,
+      "timings": {
+        "machine_default": 282,
+        "machine_few_registers": 282,
+        "machine_no_fused": 314,
+        "machine_slow_memory": 282,
+        "machine_wide_fast": 374
+      }
+    },
+    {
+      "case": "high-7",
+      "index": 1,
+      "instructions": 22,
+      "timings": {
+        "machine_default": 208,
+        "machine_few_registers": 208,
+        "machine_no_fused": 208,
+        "machine_slow_memory": 208,
+        "machine_wide_fast": 240
+      }
+    },
+    {
+      "case": "high-7",
+      "index": 2,
+      "instructions": 39,
+      "timings": {
+        "machine_default": 222,
+        "machine_few_registers": 222,
+        "machine_no_fused": 222,
+        "machine_slow_memory": 222,
+        "machine_wide_fast": 274
+      }
+    },
+    {
+      "case": "high-7",
+      "index": 3,
+      "instructions": 31,
+      "timings": {
+        "machine_default": 344,
+        "machine_few_registers": 344,
+        "machine_no_fused": 344,
+        "machine_slow_memory": 344,
+        "machine_wide_fast": 396
+      }
+    },
+    {
+      "case": "high-8",
+      "index": 0,
+      "instructions": 45,
+      "timings": {
+        "machine_default": 313,
+        "machine_few_registers": 313,
+        "machine_no_fused": 367,
+        "machine_slow_memory": 313,
+        "machine_wide_fast": 415
+      }
+    },
+    {
+      "case": "high-8",
+      "index": 1,
+      "instructions": 28,
+      "timings": {
+        "machine_default": 224,
+        "machine_few_registers": 224,
+        "machine_no_fused": 224,
+        "machine_slow_memory": 224,
+        "machine_wide_fast": 256
+      }
+    },
+    {
+      "case": "high-8",
+      "index": 2,
+      "instructions": 45,
+      "timings": {
+        "machine_default": 238,
+        "machine_few_registers": 238,
+        "machine_no_fused": 238,
+        "machine_slow_memory": 238,
+        "machine_wide_fast": 290
+      }
+    },
+    {
+      "case": "high-8",
+      "index": 3,
+      "instructions": 37,
+      "timings": {
+        "machine_default": 398,
+        "machine_few_registers": 398,
+        "machine_no_fused": 478,
+        "machine_slow_memory": 398,
+        "machine_wide_fast": 482
+      }
+    },
+    {
+      "case": "high-9",
+      "index": 0,
+      "instructions": 51,
+      "timings": {
+        "machine_default": 344,
+        "machine_few_registers": 344,
+        "machine_no_fused": 433,
+        "machine_slow_memory": 344,
+        "machine_wide_fast": 456
+      }
+    },
+    {
+      "case": "high-9",
+      "index": 1,
+      "instructions": 34,
+      "timings": {
+        "machine_default": 240,
+        "machine_few_registers": 240,
+        "machine_no_fused": 272,
+        "machine_slow_memory": 240,
+        "machine_wide_fast": 272
+      }
+    },
+    {
+      "case": "high-9",
+      "index": 2,
+      "instructions": 51,
+      "timings": {
+        "machine_default": 254,
+        "machine_few_registers": 254,
+        "machine_no_fused": 254,
+        "machine_slow_memory": 254,
+        "machine_wide_fast": 306
+      }
+    },
+    {
+      "case": "high-9",
+      "index": 3,
+      "instructions": 43,
+      "timings": {
+        "machine_default": 414,
+        "machine_few_registers": 414,
+        "machine_no_fused": 622,
+        "machine_slow_memory": 414,
+        "machine_wide_fast": 498
+      }
+    },
+    {
+      "case": "high-10",
+      "index": 0,
+      "instructions": 57,
+      "timings": {
+        "machine_default": 375,
+        "machine_few_registers": 375,
+        "machine_no_fused": 489,
+        "machine_slow_memory": 375,
+        "machine_wide_fast": 497
+      }
+    },
+    {
+      "case": "high-10",
+      "index": 1,
+      "instructions": 40,
+      "timings": {
+        "machine_default": 256,
+        "machine_few_registers": 256,
+        "machine_no_fused": 352,
+        "machine_slow_memory": 256,
+        "machine_wide_fast": 288
+      }
+    },
+    {
+      "case": "high-10",
+      "index": 2,
+      "instructions": 57,
+      "timings": {
+        "machine_default": 270,
+        "machine_few_registers": 270,
+        "machine_no_fused": 274,
+        "machine_slow_memory": 270,
+        "machine_wide_fast": 322
+      }
+    },
+    {
+      "case": "high-10",
+      "index": 3,
+      "instructions": 49,
+      "timings": {
+        "machine_default": 430,
+        "machine_few_registers": 430,
+        "machine_no_fused": 718,
+        "machine_slow_memory": 430,
+        "machine_wide_fast": 514
+      }
+    },
+    {
+      "case": "pair-7",
+      "index": 0,
+      "instructions": 39,
+      "timings": {
+        "machine_default": 297,
+        "machine_few_registers": 297,
+        "machine_no_fused": 329,
+        "machine_slow_memory": 297,
+        "machine_wide_fast": 399
+      }
+    },
+    {
+      "case": "pair-7",
+      "index": 1,
+      "instructions": 22,
+      "timings": {
+        "machine_default": 208,
+        "machine_few_registers": 208,
+        "machine_no_fused": 208,
+        "machine_slow_memory": 208,
+        "machine_wide_fast": 240
+      }
+    },
+    {
+      "case": "pair-7",
+      "index": 2,
+      "instructions": 39,
+      "timings": {
+        "machine_default": 222,
+        "machine_few_registers": 222,
+        "machine_no_fused": 222,
+        "machine_slow_memory": 222,
+        "machine_wide_fast": 274
+      }
+    },
+    {
+      "case": "pair-7",
+      "index": 3,
+      "instructions": 31,
+      "timings": {
+        "machine_default": 344,
+        "machine_few_registers": 584,
+        "machine_no_fused": 344,
+        "machine_slow_memory": 344,
+        "machine_wide_fast": 396
+      }
+    },
+    {
+      "case": "pair-8",
+      "index": 0,
+      "instructions": 45,
+      "timings": {
+        "machine_default": 313,
+        "machine_few_registers": 313,
+        "machine_no_fused": 367,
+        "machine_slow_memory": 313,
+        "machine_wide_fast": 415
+      }
+    },
+    {
+      "case": "pair-8",
+      "index": 1,
+      "instructions": 28,
+      "timings": {
+        "machine_default": 224,
+        "machine_few_registers": 224,
+        "machine_no_fused": 224,
+        "machine_slow_memory": 224,
+        "machine_wide_fast": 256
+      }
+    },
+    {
+      "case": "pair-8",
+      "index": 2,
+      "instructions": 45,
+      "timings": {
+        "machine_default": 238,
+        "machine_few_registers": 238,
+        "machine_no_fused": 238,
+        "machine_slow_memory": 238,
+        "machine_wide_fast": 290
+      }
+    },
+    {
+      "case": "pair-8",
+      "index": 3,
+      "instructions": 37,
+      "timings": {
+        "machine_default": 398,
+        "machine_few_registers": 638,
+        "machine_no_fused": 478,
+        "machine_slow_memory": 398,
+        "machine_wide_fast": 482
+      }
+    },
+    {
+      "case": "pair-9",
+      "index": 0,
+      "instructions": 51,
+      "timings": {
+        "machine_default": 359,
+        "machine_few_registers": 359,
+        "machine_no_fused": 448,
+        "machine_slow_memory": 359,
+        "machine_wide_fast": 481
+      }
+    },
+    {
+      "case": "pair-9",
+      "index": 1,
+      "instructions": 34,
+      "timings": {
+        "machine_default": 240,
+        "machine_few_registers": 240,
+        "machine_no_fused": 272,
+        "machine_slow_memory": 240,
+        "machine_wide_fast": 272
+      }
+    },
+    {
+      "case": "pair-9",
+      "index": 2,
+      "instructions": 51,
+      "timings": {
+        "machine_default": 254,
+        "machine_few_registers": 254,
+        "machine_no_fused": 254,
+        "machine_slow_memory": 254,
+        "machine_wide_fast": 306
+      }
+    },
+    {
+      "case": "pair-9",
+      "index": 3,
+      "instructions": 43,
+      "timings": {
+        "machine_default": 414,
+        "machine_few_registers": 654,
+        "machine_no_fused": 622,
+        "machine_slow_memory": 414,
+        "machine_wide_fast": 498
+      }
+    },
+    {
+      "case": "pair-10",
+      "index": 0,
+      "instructions": 57,
+      "timings": {
+        "machine_default": 375,
+        "machine_few_registers": 375,
+        "machine_no_fused": 489,
+        "machine_slow_memory": 375,
+        "machine_wide_fast": 497
+      }
+    },
+    {
+      "case": "pair-10",
+      "index": 1,
+      "instructions": 40,
+      "timings": {
+        "machine_default": 256,
+        "machine_few_registers": 256,
+        "machine_no_fused": 352,
+        "machine_slow_memory": 256,
+        "machine_wide_fast": 288
+      }
+    },
+    {
+      "case": "pair-10",
+      "index": 2,
+      "instructions": 57,
+      "timings": {
+        "machine_default": 270,
+        "machine_few_registers": 270,
+        "machine_no_fused": 274,
+        "machine_slow_memory": 270,
+        "machine_wide_fast": 322
+      }
+    },
+    {
+      "case": "pair-10",
+      "index": 3,
+      "instructions": 49,
+      "timings": {
+        "machine_default": 430,
+        "machine_few_registers": 670,
+        "machine_no_fused": 718,
+        "machine_slow_memory": 430,
+        "machine_wide_fast": 514
+      }
+    },
+    {
+      "case": "ten-bit-one-bit-field",
+      "index": 0,
+      "instructions": 3,
+      "timings": {
+        "machine_default": 48,
+        "machine_few_registers": 48,
+        "machine_no_fused": 48,
+        "machine_slow_memory": 48,
+        "machine_wide_fast": 48
+      }
+    },
+    {
+      "case": "ten-bit-one-bit-field",
+      "index": 1,
+      "instructions": 6,
+      "timings": {
+        "machine_default": 96,
+        "machine_few_registers": 96,
+        "machine_no_fused": 96,
+        "machine_slow_memory": 96,
+        "machine_wide_fast": 96
+      }
+    },
+    {
+      "case": "ten-bit-one-bit-field",
+      "index": 2,
+      "instructions": 3,
+      "timings": {
+        "machine_default": 48,
+        "machine_few_registers": 48,
+        "machine_no_fused": 48,
+        "machine_slow_memory": 48,
+        "machine_wide_fast": 48
+      }
+    },
+    {
+      "case": "ten-bit-one-bit-field",
+      "index": 3,
+      "instructions": 21,
+      "timings": {
+        "machine_default": 256,
+        "machine_few_registers": 256,
+        "machine_no_fused": 256,
+        "machine_slow_memory": 256,
+        "machine_wide_fast": 240
+      }
+    }
+  ]
+}

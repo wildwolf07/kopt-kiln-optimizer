@@ -987,6 +987,13 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         }
     }
+    if (progSize <= 1000 && !dense && passEnabled("widefinite")) {
+        auto programs = finiteWideAlternatives(base);
+        for (size_t i = 0; i < programs.size(); i++) {
+            Cand c; c.p = std::move(programs[i]); c.what = "wide-table" + std::to_string(i);
+            quick(c); cands.push_back(std::move(c));
+        }
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

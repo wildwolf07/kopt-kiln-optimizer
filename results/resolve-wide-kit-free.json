@@ -1,0 +1,59 @@
+{
+  "source_root": "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-resolve/src",
+  "hashes": {
+    "finite.cpp": "63ef7759db302ac90b31829fb4d75a0a65810d97a5f1e7398758338e9e58a1c9",
+    "finite_domain.cpp": "9a6cc67b6a6da4e79aed2ad581d3c17b34f35fd7fc7215f51c7aced6748ac707",
+    "passes.h": "7f411bf271ac1a41ca6c7c363ab00288067f552eaf5be7942a1a7c7be822cb2f"
+  },
+  "kit_free": true,
+  "comparisons": 38912,
+  "candidates": 36,
+  "legacy_cases": 41,
+  "rows": [
+    {
+      "case": "high-7",
+      "candidates": 4,
+      "projection_states": 128
+    },
+    {
+      "case": "high-8",
+      "candidates": 4,
+      "projection_states": 256
+    },
+    {
+      "case": "high-9",
+      "candidates": 4,
+      "projection_states": 512
+    },
+    {
+      "case": "high-10",
+      "candidates": 4,
+      "projection_states": 1024
+    },
+    {
+      "case": "pair-7",
+      "candidates": 4,
+      "projection_states": 128
+    },
+    {
+      "case": "pair-8",
+      "candidates": 4,
+      "projection_states": 256
+    },
+    {
+      "case": "pair-9",
+      "candidates": 4,
+      "projection_states": 512
+    },
+    {
+      "case": "pair-10",
+      "candidates": 4,
+      "projection_states": 1024
+    },
+    {
+      "case": "ten-bit-one-bit-field",
+      "candidates": 4,
+      "projection_states": 1024
+    }
+  ]
+}

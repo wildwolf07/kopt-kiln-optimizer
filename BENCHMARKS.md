@@ -1,3 +1,78 @@
+# optimizer-resolve validation
+
+Compared with separately built integrated main `daac25e`, preserving earlier
+searches and six-bit specialization. These are public measurements, not a hidden
+score prediction. Only this branch/worktree was changed.
+
+| Machine | Main sample cycles | Resolve sample cycles | Main randomized cycles | Resolve randomized cycles |
+|---|---:|---:|---:|---:|
+| default | 9,758 | 9,431 | 56,563 | 54,780 |
+| few_registers | 14,999 | 14,298 | 88,303 | 84,599 |
+| no_fused | 12,186 | 11,407 | 70,413 | 66,273 |
+| slow_memory | 13,977 | 13,648 | 83,760 | 81,983 |
+| wide_fast | 7,270 | 7,062 | 41,700 | 40,471 |
+
+Each version passed 500 program/machine checks, sample plus 100 additional
+inputs, with repeat-output determinism. Random scoring uses eight inputs after
+offset 40, skipping the generator's fixed edge prefix. Five sample pairs improve
+and 495 tie; none regress. The improvement is the eight-bit pure divisor-count
+loop, which changes from 249–810 to 31–41 cycles depending on the machine.
+
+Independently generated seven-to-ten-bit nonlinear recurrences cover all five
+machines, using seed 2115. Forty-four of 60 sample pairs improve, 15 tie and one
+regresses (wide-fast case 2: 40 → 48); its held-out total improves 320 → 172.
+Aggregate held-out cycles improve on every machine:
+
+| Machine | Generated sample before → after | Generated randomized before → after |
+|---|---:|---:|
+| default | 819 → 425 | 6,552 → 2,829 |
+| few_registers | 819 → 425 | 6,552 → 2,829 |
+| no_fused | 1,032 → 492 | 8,256 → 3,414 |
+| slow_memory | 1,071 → 497 | 8,568 → 3,405 |
+| wide_fast | 695 → 433 | 5,560 → 2,755 |
+
+Reproduce with:
+
+```sh
+python3 tools/bench.py --machines all --random 100 --score-offset 40
+python3 tools/finite_sweep.py --baseline /path/to/main/kopt --candidate ./kopt \
+  --wide --cases 12 --seed 2115 --random 100 --save /tmp/generated.json
+```
+
+The default finite-sweep mode still generates the historical one-to-six-bit
+recurrences. Every table is derived from the supplied source at compile time.
+
+Four independently generated machines (seed 2113) passed all 400 paired
+program/machine checks, with 100 additional inputs and repeat-output checks.
+Their full per-case results and descriptions are in
+`results/resolve-machine-sweep.json`.
+
+Frozen-source validation:
+
+- 2,500 strict-mode fuzz programs (seed 2111), 1,000 metamorphic programs
+  (seed 2112) and all 42 saved regressions passed.
+- 300 ASan/UBSan fuzz programs (seed 2114), 50 smoke pairs plus four negative
+  controls, 43 original bit-demand gates and three dense-pressure sizes passed.
+- The direct pass driver bypasses optimizer selection/fallback: 41,792 official
+  comparisons over 36 candidates, every projected 7–10-bit state, outside-mask
+  raw bits and random words. It checks 41 inherited six-bit gates, final-class
+  trap/nontermination rejection, aggregate work and output-size caps, fresh
+  names, valid SSA and determinism.
+- Kit-free direct mode passed 38,912 local-interpreter self-checks. These share
+  the optimizer interpreter and complement the independent official checks.
+  The same 38,912 direct checks also passed under ASan/UBSan.
+- Linux strict C++17 compilation passed. Linux-built output passed 2,560 official
+  comparisons covering all divisor-count projections and outside-mask bits.
+  That kernel compiled in 0.45–0.78 s across the five machines in the Linux VM.
+- Generated 100k-instruction straight/loop inputs took 2.50/8.26 s in the Linux
+  VM, with approximately 116/186 MiB peak RSS. These are local measurements.
+
+Cost profiling of integrated main separately identified matrix multiply's
+long-lived loaded values and sieve's branch fences as remaining weaknesses.
+See `results/resolve-weak-areas.json` for all ten kernel/machine breakdowns.
+
+---
+
 # optimizer-vector validation
 
 Isolated branch based on `optimizer-apex` (`0683c43`). Adds an exact symbolic

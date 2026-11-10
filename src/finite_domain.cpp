@@ -6,7 +6,8 @@
 
 namespace kopt {
 
-bool finiteInputMasks(const Program &p, std::vector<uint32_t> &masks) {
+bool finiteInputMasksUpTo(const Program &p, std::vector<uint32_t> &masks, unsigned maxBits) {
+    if (maxBits > 10) return false;
     if (p.blocks.empty() || p.blocks.size() > 256 || p.params.size() > 8 || p.instrCount() > 8000) return false;
     for (const Block &b : p.blocks) for (const Instr &x : b.ins)
         if (isMemOp(x.op) || x.op == OP_TRAP) return false;
@@ -121,10 +122,14 @@ bool finiteInputMasks(const Program &p, std::vector<uint32_t> &masks) {
     unsigned bits = 0;
     for (Val v : f.params) {
         const uint32_t m = demand[v]; result.push_back(m);
-        for (uint32_t b = m; b; b &= b - 1) if (++bits > 6) return false;
+        for (uint32_t b = m; b; b &= b - 1) if (++bits > maxBits) return false;
     }
     masks = std::move(result);
     return true;
+}
+
+bool finiteInputMasks(const Program &p, std::vector<uint32_t> &masks) {
+    return finiteInputMasksUpTo(p, masks, 6);
 }
 
 }  // namespace kopt

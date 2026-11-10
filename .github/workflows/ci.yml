@@ -28,6 +28,10 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/finite_domain.py --kit-free
+      - name: Check wide finite-domain proofs and budgets
+        env:
+          CXX: g++-11
+        run: python3 tests/wide_finite.py --kit-free
       - name: Check bit-affine proof and structural gates
         env:
           CXX: g++-11
