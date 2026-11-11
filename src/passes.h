@@ -57,6 +57,8 @@ bool bitAffineFunction(const Program &in, const Machine &m, Program &out);
 bool rematerializeLoads(Func &f);
 bool packIndexedCounts(Func &f);
 bool factorSelects(Func &f);
+bool hoistPureArms(Func &f, int budget);
+bool hoistToIdom(Func &f, int budget);
 std::vector<Program> rowPairAlternatives(const Program &in);
 bool promoteRollingLoad(Func &f);
 bool finiteInputMasksUpTo(const Program &in, std::vector<uint32_t> &masks, unsigned maxBits);

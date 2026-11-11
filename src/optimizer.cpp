@@ -1335,6 +1335,65 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : pairs) cands.push_back(std::move(c));
     }
+    // Join hoisting: empty pure branch arms into the branch block and move
+    // pure join work above the branch, so loop tests and counters no longer
+    // wait behind an effectful arm. Final-only, own deterministic budget.
+    if (effort == 2 && passEnabled("joinhoist")) {
+        const auto seeds = bestDistinct(cands, 4);
+        uint64_t incumbent = UINT64_MAX;
+        for (const Cand &c : cands) if (c.ok) incumbent = std::min(incumbent, c.cycles);
+        std::vector<Cand> hoisted;
+        size_t work = 0;
+        for (const Cand *seed : seeds) {
+            // Decision graphs are tuned to the training distribution already.
+            if (seed->what.rfind("wide-table", 0) == 0 || seed->what.rfind("finite-table", 0) == 0) continue;
+            if (seed->p.instrCount() > 1500 || work + seed->p.instrCount() > 6000) continue;
+            work += seed->p.instrCount();
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f);
+            bool any = false;
+            for (int round = 0; round < 3; ++round) {
+                bool c = hoistPureArms(f, 12);
+                c |= hoistToIdom(f, 64);
+                if (!c) break;
+                any = true;
+                instSimplify(f); dce(f);
+            }
+            if (!any) continue;
+            simplifyCFG(f); dce(f);
+            const bool scratch = canSpillToScratch(f);
+            std::vector<Cand> local;
+            for (int mode = 0; mode < 4; ++mode) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo;
+                bo.preSchedule = mode != 0;
+                bo.bottomUpSchedule = mode == 2;
+                bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.flags = seed->flags;
+                c.what = seed->what + "/joinhoist" + std::to_string(mode);
+                quick(c); local.push_back(std::move(c));
+            }
+            int best = -1;
+            for (size_t i = 0; i < local.size(); ++i)
+                if (local[i].ok && (best < 0 || local[i].cycles < local[best].cycles)) best = static_cast<int>(i);
+            if (best >= 0) {
+                const Cand top = local[best];
+                for (bool chains : {true, false}) {
+                    Cand c; c.p = traceLayout(top.p, inputs, chains);
+                    c.flags = top.flags; c.what = top.what + (chains ? "/trace" : "/hot");
+                    quick(c); local.push_back(std::move(c));
+                }
+            }
+            for (Cand &c : local) hoisted.push_back(std::move(c));
+        }
+        // Only a clear training win replaces the incumbent: sub-0.5% gains of a
+        // final-only stage did not carry over to other inputs.
+        for (Cand &c : hoisted)
+            if (c.ok && (incumbent == UINT64_MAX || c.cycles * 1000 < incumbent * 995)) cands.push_back(std::move(c));
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";
