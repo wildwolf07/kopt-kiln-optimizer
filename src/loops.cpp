@@ -542,6 +542,138 @@ int knownAtEnd(const Func &f, int p, int r, int depth) {
 
 }  // namespace
 
+namespace {
+
+bool pureAluOp(Op op) {
+    switch (op) {
+        case OP_CONST: case OP_MOV: case OP_ADD: case OP_SUB: case OP_MUL: case OP_AND:
+        case OP_OR: case OP_XOR: case OP_SHL: case OP_SHR: case OP_LT: case OP_EQ:
+        case OP_SELECT: case OP_MAC: case OP_ADDSH:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Registers whose values on entry to X determine X's branch condition, when
+// that condition is a pure, non-trapping expression computed inside X.
+bool branchLeaves(const BB &X, std::vector<int> &leaves) {
+    const Inst &t = X.term();
+    int budget = 32;
+    bool ok = true;
+    auto expand = [&](auto &&self, int r, int pos) -> void {
+        if (!ok) return;
+        if (--budget < 0) { ok = false; return; }
+        for (int q = pos - 1; q >= 0; q--) {
+            const Inst &y = X.insts[static_cast<size_t>(q)];
+            if (y.dst != r) continue;
+            if (!pureAluOp(y.op)) { ok = false; return; }
+            for (int s = 0; s < y.n; s++)
+                if (!y.a[s].isConst) self(self, y.a[s].v, q);
+            return;
+        }
+        if (std::find(leaves.begin(), leaves.end(), r) == leaves.end()) leaves.push_back(r);
+    };
+    expand(expand, t.a[0].v, static_cast<int>(X.insts.size()) - 1);
+    return ok;
+}
+
+}  // namespace
+
+// Monotone unswitching (register form). In an innermost loop, a branch in X
+// whose condition is a pure expression of registers R (computed in X) has a
+// "stable" side E when every write to R inside the loop happens in blocks
+// that the other successor T (whose only predecessor is X) dominates within
+// one iteration. Once X goes to E, T does not run in that iteration, so R
+// never changes again before the loop exits: every later evaluation of the
+// condition sees the same R and goes to E again. The E edge therefore enters
+// a copy of the loop in which X jumps straight to E. Entry from outside still
+// reaches the original loop, so each loop instance starts with the full test.
+bool monotoneUnswitch(Func &f, int sizeBudget) {
+    f.rebuildPreds();
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    const int n0 = static_cast<int>(f.bb.size());
+    std::vector<char> isHeader(static_cast<size_t>(n0), 0), done(static_cast<size_t>(n0), 0);
+    for (const auto &L : li.loops) isHeader[static_cast<size_t>(L.header)] = 1;
+    bool changed = false;
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop L = li.loops[l];
+        const int h = L.header;
+        if (h == 0 || irr[h]) continue;
+        std::vector<char> in(static_cast<size_t>(n0), 0);
+        bool skip = false;
+        int size = 0;
+        for (int b : L.blocks) {
+            if ((b != h && isHeader[b]) || irr[b] || done[b] || !f.bb[b].alive) skip = true;
+            in[b] = 1;
+            size += static_cast<int>(f.bb[b].insts.size());
+        }
+        if (skip || 2 * size > sizeBudget) continue;
+        int cx = -1, stable = -1;
+        for (int x : L.blocks) {
+            const Inst &t = f.bb[x].term();
+            if (t.op != OP_BR || t.a[0].isConst || t.tgt[0] == t.tgt[1]) continue;
+            std::vector<int> leaves;
+            if (!branchLeaves(f.bb[x], leaves)) continue;
+            for (int side = 0; side < 2; side++) {
+                const int T = t.tgt[side], E = t.tgt[1 - side];
+                if (T < 0 || T >= n0 || E < 0 || E >= n0 || !in[T] || !in[E] || T == h) continue;
+                if (f.bb[T].preds.size() != 1 || f.bb[T].preds[0] != x) continue;
+                // Blocks reachable from the header within one iteration without T.
+                std::vector<char> avoid(static_cast<size_t>(n0), 0);
+                std::vector<int> stack{h};
+                avoid[h] = 1;
+                while (!stack.empty()) {
+                    const int b = stack.back();
+                    stack.pop_back();
+                    const Inst &bt = f.bb[b].term();
+                    const int nt = bt.op == OP_JMP ? 1 : (bt.op == OP_BR ? 2 : 0);
+                    for (int k = 0; k < nt; k++) {
+                        const int s = bt.tgt[k];
+                        if (s < 0 || s >= n0 || !in[s] || s == h || s == T || avoid[s]) continue;
+                        avoid[s] = 1;
+                        stack.push_back(s);
+                    }
+                }
+                bool ok = avoid[x] != 0;
+                for (int b : L.blocks) {
+                    if (!ok) break;
+                    if (!avoid[b]) continue;
+                    for (const Inst &y : f.bb[b].insts)
+                        if (y.dst >= 0 && std::find(leaves.begin(), leaves.end(), y.dst) != leaves.end()) ok = false;
+                }
+                if (ok) { cx = x; stable = 1 - side; break; }
+            }
+            if (cx >= 0) break;
+        }
+        if (cx < 0) continue;
+        std::unordered_map<int, int> clone;
+        for (int b : L.blocks) {
+            clone[b] = static_cast<int>(f.bb.size());
+            BB copy = f.bb[b];
+            copy.label.clear();
+            f.bb.push_back(copy);
+        }
+        for (int b : L.blocks) {
+            Inst &t = f.bb[clone[b]].term();
+            const int nt = t.op == OP_JMP ? 1 : (t.op == OP_BR ? 2 : 0);
+            for (int k = 0; k < nt; k++)
+                if (t.tgt[k] >= 0 && t.tgt[k] < n0 && in[t.tgt[k]]) t.tgt[k] = clone[t.tgt[k]];
+        }
+        const int E = f.bb[cx].term().tgt[stable];
+        f.bb[cx].term().tgt[stable] = clone[E];
+        Inst &u = f.bb[clone[cx]].term();
+        u.op = OP_JMP; u.n = 0; u.tgt[0] = clone[E]; u.tgt[1] = -1;
+        for (int b : L.blocks) done[b] = 1;
+        done.resize(f.bb.size(), 1);
+        f.rebuildPreds();   // later loops test predecessor counts
+        changed = true;
+    }
+    return changed;
+}
+
 bool threadJumps(Func &f, int maxBlockSize, int maxNewInstrs) {
     f.rebuildPreds();
     bool changed = false;

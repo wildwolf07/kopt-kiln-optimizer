@@ -79,6 +79,8 @@ CXX=clang++ python3 tests/arithmetic_compact.py
 CXX=clang++ python3 tests/signed_pow2.py
 CXX=clang++ python3 tests/counted_loops.py --integrated-bin build/kopt-bin
 python3 tests/unswitch_pipeline.py
+python3 tests/monotone_unswitch.py --count 300
+python3 tests/pipeline_across.py --count 300
 ```
 
 The fuzzer includes conditional pointer cursors, counted recurrences and

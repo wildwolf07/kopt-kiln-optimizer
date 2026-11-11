@@ -872,6 +872,24 @@ Range rangeAt(const Func &f, const std::vector<DefSite> &ds, Opnd o, int b,
     return lo <= hi ? Range{lo, hi} : r;
 }
 
+// Signed upper bound of an operand where it is used in block b (global facts
+// refined by the guarding branches); kSMax when nothing is known.
+int64_t signedHiAt(const Func &f, const std::vector<DefSite> &ds, Opnd o, int b, const std::vector<int> *idom) {
+    if (o.isConst) return static_cast<int32_t>(o.c);
+    const Range r = rangeOf(f, ds, o, 8);
+    SR base = fromRange(r);
+    if (o.v < static_cast<int>(gVRP.size()) && !gVRP[o.v].empty()) {
+        const SR &g = gVRP[o.v];
+        SR both{std::max(base.lo, g.lo), std::min(base.hi, g.hi)};
+        if (!both.empty()) base = both;
+    }
+    std::vector<Fact> facts = chainFacts(f, ds, b, idom);
+    if (facts.empty()) return base.hi;
+    auto other = [&](Opnd x) -> SR { return fromRange(rangeOf(f, ds, x, 6)); };
+    SR s = refine(base, o.v, facts, other);
+    return s.empty() ? base.hi : s.hi;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -4556,6 +4574,273 @@ bool ifConvert(Func &f, const Machine &m) {
         changed = true;
     }
     return changed;
+}
+
+
+// ---------------------------------------------------------------------------
+// Cross-iteration load pipelining over inner loops. A loop whose header H
+// (pure work, br c, B, EXIT) leads to B (only predecessor H), where B's first
+// effect is  x = load iv + c  (iv a header phi stepping by constant s), can
+// read the NEXT iteration's word right after x: every later effect of the
+// iteration (including inner loops) happens between the two reads. That is
+// exact when no store in the loop can write word iv + s + c:
+//   * a store to iv + c3 with c3 != s + c (same value, different offset), or
+//   * a store to j + c2 where j is an inner-loop header phi that never
+//     decreases (step = constant or invariant value in [0, 2^31), no wrap
+//     by its global range) and starts at j0 = a*iv + b, so j + c2 >= a*iv + b
+//     + c2 > iv + s + c over the whole range of iv (checked at both ends; all
+//     quantities are proven to be exact integers below 2^32).
+// The reads issued early use  addr & 4095,  so they never trap; whenever the
+// carried value is used, the original address is in range (range proof at B)
+// and equals the masked one. The first iteration's value is read at the end of
+// the preheader, separated from B only by pure work.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct Affine64 { bool ok = false; int64_t a = 0, b = 0; };
+
+// Outer-loop induction context: iv = i0 + s*n in iteration n (i0 constant).
+struct IvContext { int header = -1, pre = -1, latch = -1; Val iv = -1; int64_t i0 = 0, s = 0; bool constInit = false; };
+
+Affine64 affineIn(Func &f, const std::vector<DefSite> &ds, Opnd o, const IvContext &ctx, int depth) {
+    const Val iv = ctx.iv;
+    Affine64 r;
+    o = f.resolve(o);
+    if (o.isConst) { r.ok = true; r.b = static_cast<int32_t>(o.c); return r; }
+    if (o.v == iv) { r.ok = true; r.a = 1; return r; }
+    if (depth <= 0) return r;
+    const Inst *x = defInst(f, ds, o);
+    if (!x) {
+        // Another header phi t with constant start t0 and constant step k in
+        // lockstep with iv: t = t0 + k*n, iv = i0 + s*n, so when s divides k,
+        // t == (k/s)*iv + t0 - (k/s)*i0 modulo 2^32 (the caller then proves
+        // the integer value lies in [0, 2^32), which makes it exact).
+        if (!ctx.constInit || ds[o.v].block != ctx.header || !ds[o.v].isPhi) return r;
+        for (const Phi &ph : f.bb[ctx.header].phis) {
+            if (ph.dst != o.v || ph.in.size() != 2) continue;
+            Opnd t0, tn;
+            bool a0 = false, an = false;
+            for (const auto &e : ph.in) {
+                if (e.first == ctx.pre) { t0 = f.resolve(e.second); a0 = true; }
+                if (e.first == ctx.latch) { tn = f.resolve(e.second); an = true; }
+            }
+            if (!a0 || !an || !t0.isConst || tn.isConst) return r;
+            const AddrForm tf = addrForm(f, ds, tn);
+            if (!tf.hasBase || tf.base != o.v) return r;
+            const int64_t k = static_cast<int32_t>(tf.off);
+            if (ctx.s == 0 || k % ctx.s != 0) return r;
+            r.ok = true;
+            r.a = k / ctx.s;
+            r.b = static_cast<int32_t>(t0.c) - r.a * ctx.i0;
+            if (r.a <= -(1 << 20) || r.a >= (1 << 20)) r.ok = false;
+            return r;
+        }
+        return r;
+    }
+    auto lim = [](const Affine64 &v) { return v.ok && v.a > -(1 << 20) && v.a < (1 << 20) && v.b > -(int64_t{1} << 40) && v.b < (int64_t{1} << 40); };
+    Affine64 p, q;
+    switch (x->op) {
+    case OP_MOV:
+        return affineIn(f, ds, x->a[0], ctx, depth - 1);
+    case OP_ADD: case OP_SUB:
+        p = affineIn(f, ds, x->a[0], ctx, depth - 1); q = affineIn(f, ds, x->a[1], ctx, depth - 1);
+        if (!p.ok || !q.ok) return r;
+        r.ok = true;
+        r.a = x->op == OP_ADD ? p.a + q.a : p.a - q.a;
+        r.b = x->op == OP_ADD ? p.b + q.b : p.b - q.b;
+        break;
+    case OP_MUL:
+        p = affineIn(f, ds, x->a[0], ctx, depth - 1); q = affineIn(f, ds, x->a[1], ctx, depth - 1);
+        if (!p.ok || !q.ok) return r;
+        if (p.a != 0 && q.a != 0) return r;
+        if (p.a == 0) std::swap(p, q);   // q constant
+        if (q.b > (1 << 12) || q.b < -(1 << 12)) return r;
+        r.ok = true; r.a = p.a * q.b; r.b = p.b * q.b;
+        break;
+    case OP_SHL:
+        if (!x->a[1].isConst || x->a[1].c > 12) return r;
+        p = affineIn(f, ds, x->a[0], ctx, depth - 1);
+        if (!p.ok) return r;
+        r.ok = true; r.a = p.a << x->a[1].c; r.b = p.b * (int64_t{1} << x->a[1].c);
+        break;
+    case OP_ADDSH:
+        if (x->k > 12) return r;
+        p = affineIn(f, ds, x->a[0], ctx, depth - 1); q = affineIn(f, ds, x->a[1], ctx, depth - 1);
+        if (!p.ok || !q.ok) return r;
+        r.ok = true; r.a = p.a + (q.a << x->k); r.b = p.b + q.b * (int64_t{1} << x->k);
+        break;
+    default:
+        return r;
+    }
+    if (!lim(r)) r.ok = false;
+    return r;
+}
+
+}  // namespace
+
+bool pipelineAcrossLoops(Func &f) {
+    f.resolveAll();
+    f.rebuildPreds();
+    clearIVRanges();
+    computeIVRanges(f);
+    computeVRP(f);
+    std::vector<DefSite> ds = defSites(f);
+    DomInfo d = computeDominators(f);
+    LoopInfo li = computeLoops(f, d);
+    std::vector<bool> irr = irreducibleBlocks(f, d);
+    const int64_t kTop = int64_t{1} << 32;
+    for (size_t l = 0; l < li.loops.size(); l++) {
+        const LoopInfo::Loop &L = li.loops[l];
+        const int h = L.header;
+        if (h == 0 || irr[h] || L.latches.size() != 1) continue;
+        bool bad = false;
+        for (int b : L.blocks) if (irr[b] || !f.bb[b].alive) bad = true;
+        if (bad) continue;
+        std::vector<char> in(f.bb.size(), 0);
+        for (int b : L.blocks) in[static_cast<size_t>(b)] = 1;
+        const BB &H = f.bb[h];
+        if (H.preds.size() != 2) continue;
+        const int latch = L.latches[0];
+        const int pre = H.preds[0] == latch ? H.preds[1] : H.preds[0];
+        if (pre == latch || in[static_cast<size_t>(pre)] || (H.preds[0] != latch && H.preds[1] != latch)) continue;
+        const Inst &ht = H.term();
+        if (ht.op != OP_BR || ht.tgt[0] == ht.tgt[1]) continue;
+        const int B = in[static_cast<size_t>(ht.tgt[0])] ? ht.tgt[0] : ht.tgt[1];
+        const int other = B == ht.tgt[0] ? ht.tgt[1] : ht.tgt[0];
+        if (!in[static_cast<size_t>(B)] || in[static_cast<size_t>(other)] || B == h) continue;
+        if (f.bb[B].preds.size() != 1 || f.bb[B].preds[0] != h) continue;
+        for (size_t i = 0; i + 1 < H.insts.size(); i++)
+            if (!isPure(H.insts[i].op) && H.insts[i].op != OP_CONST) bad = true;
+        if (bad) continue;
+        const BB &Bb = f.bb[B];
+        int at = -1;
+        for (size_t i = 0; i + 1 < Bb.insts.size(); i++) {
+            const Inst &x = Bb.insts[i];
+            if (x.op == OP_LOAD) { at = static_cast<int>(i); break; }
+            if (!isPure(x.op) && x.op != OP_CONST) break;
+        }
+        if (at < 0) continue;
+        const Inst ld = Bb.insts[static_cast<size_t>(at)];
+        const Opnd A = f.resolve(ld.a[0]);
+        if (A.isConst || ld.dst < 0) continue;
+        const AddrForm af = addrForm(f, ds, A);
+        if (!af.hasBase || ds[af.base].block != h || !ds[af.base].isPhi) continue;
+        const Val iv = af.base;
+        const Phi *ivp = nullptr;
+        for (const Phi &ph : H.phis) if (ph.dst == iv) ivp = &ph;
+        if (!ivp || ivp->in.size() != 2) continue;
+        Opnd init, next;
+        bool hi = false, hn = false;
+        for (const auto &e : ivp->in) {
+            if (e.first == pre) { init = f.resolve(e.second); hi = true; }
+            if (e.first == latch) { next = f.resolve(e.second); hn = true; }
+        }
+        if (!hi || !hn || next.isConst) continue;
+        const AddrForm nf = addrForm(f, ds, next);
+        if (!nf.hasBase || nf.base != iv || nf.off == 0) continue;
+        const int64_t sS = static_cast<int32_t>(nf.off), cS = static_cast<int32_t>(af.off);
+        IvContext ctx;
+        ctx.header = h; ctx.pre = pre; ctx.latch = latch; ctx.iv = iv; ctx.s = sS;
+        ctx.constInit = init.isConst; ctx.i0 = init.isConst ? static_cast<int32_t>(init.c) : 0;
+        if (rangeAt(f, ds, A, B, &d.idom).hi >= kMemWords) continue;
+        const Range ri = rangeAt(f, ds, Opnd::val(iv), B, &d.idom);
+        if (ri.hi >= (uint64_t{1} << 20)) continue;
+        const int64_t ivLo = static_cast<int64_t>(ri.lo), ivHi = static_cast<int64_t>(ri.hi);
+        // Next word as an exact integer over the whole range of iv.
+        if (ivLo + sS + cS < 0 || ivHi + sS + cS >= kTop) continue;
+        auto disjoint = [&](Opnd a) -> bool {
+            a = f.resolve(a);
+            if (a.isConst) {
+                const int64_t w = a.c;
+                return w < ivLo + sS + cS || w > ivHi + sS + cS;
+            }
+            const AddrForm g = addrForm(f, ds, a);
+            if (!g.hasBase) return false;
+            if (g.base == iv) return g.off != static_cast<uint32_t>(nf.off + af.off);
+            const DefSite &jd = ds[g.base];
+            if (!jd.isPhi || jd.block == h || !in[static_cast<size_t>(jd.block)]) return false;
+            const int h2 = jd.block;
+            int l2 = -1;
+            for (size_t k = 0; k < li.loops.size(); k++) if (li.loops[k].header == h2) l2 = static_cast<int>(k);
+            if (l2 < 0) return false;
+            std::vector<char> in2(f.bb.size(), 0);
+            for (int b : li.loops[static_cast<size_t>(l2)].blocks) in2[static_cast<size_t>(b)] = 1;
+            const Phi *jp = nullptr;
+            for (const Phi &ph : f.bb[h2].phis) if (ph.dst == g.base) jp = &ph;
+            if (!jp || jp->in.size() != 2) return false;
+            Opnd j0, jn;
+            int outsideCount = 0;
+            for (const auto &e : jp->in) {
+                if (in2[static_cast<size_t>(e.first)]) jn = f.resolve(e.second);
+                else { j0 = f.resolve(e.second); outsideCount++; }
+            }
+            if (outsideCount != 1 || jn.isConst) return false;
+            // Step: jn = j + w with w a constant or value in [0, 2^31).
+            const Inst *sx = defInst(f, ds, jn);
+            if (!sx || sx->op != OP_ADD) return false;
+            Opnd w;
+            if (!sx->a[0].isConst && f.resolve(sx->a[0]) == Opnd::val(g.base)) w = f.resolve(sx->a[1]);
+            else if (!sx->a[1].isConst && f.resolve(sx->a[1]) == Opnd::val(g.base)) w = f.resolve(sx->a[0]);
+            else return false;
+            // No wrap where the step runs: j there (branch-refined) plus w
+            // stays below 2^32, so every step is j' = j + w >= j as integers.
+            const int stepBlock = ds[jn.v].block;
+            if (stepBlock < 0 || !in2[static_cast<size_t>(stepBlock)]) return false;
+            const Range rw = w.isConst ? Range{w.c, w.c} : rangeAt(f, ds, w, stepBlock, &d.idom);
+            if (rw.hi >= 0x80000000ull) return false;
+            // j >= j0 = a*iv + b, exact over the range of iv.
+            const Affine64 j0f = affineIn(f, ds, j0, ctx, 8);
+            if (!j0f.ok) return false;
+            const int64_t e1 = j0f.a * ivLo + j0f.b, e2 = j0f.a * ivHi + j0f.b;
+            const int64_t kHalf = int64_t{1} << 31;
+            if (std::min(e1, e2) < 0 || std::max(e1, e2) >= kHalf) return false;
+            // Induction: every j is an integer in [0, 2^31). It starts as j0;
+            // where the step runs, the signed bound of j (guards included) is
+            // hiStep, and hiStep + w < 2^31, so j' = j + w is exact and >= j.
+            const int64_t hiStep = signedHiAt(f, ds, Opnd::val(g.base), stepBlock, &d.idom);
+            if (hiStep < 0 || hiStep + static_cast<int64_t>(rw.hi) >= kHalf) return false;
+            const int64_t jLo = std::min(e1, e2), jHi = std::max(std::max(e1, e2), hiStep + static_cast<int64_t>(rw.hi));
+            // Store address j + c2 is then an exact integer.
+            const int64_t c2 = static_cast<int32_t>(g.off);
+            if (jLo + c2 < 0 || jHi + c2 >= kTop) return false;
+            // a*iv + b + c2 > iv + s + c at both ends of the range of iv.
+            const int64_t g1 = (j0f.a - 1) * ivLo + j0f.b + c2 - sS - cS;
+            const int64_t g2 = (j0f.a - 1) * ivHi + j0f.b + c2 - sS - cS;
+            return g1 > 0 && g2 > 0;
+        };
+        for (int b : L.blocks) {
+            for (const Inst &x : f.bb[b].insts)
+                if (x.op == OP_STORE && !disjoint(x.a[0])) bad = true;
+            if (bad) break;
+        }
+        if (bad) continue;
+        // Transform.
+        auto readMasked = [&](Opnd base, uint32_t off, std::vector<Inst> &out) {
+            Inst ad; ad.op = OP_ADD; ad.dst = f.newVal(); ad.n = 2; ad.a[0] = base; ad.a[1] = Opnd::cst(off);
+            Inst mk; mk.op = OP_AND; mk.dst = f.newVal(); mk.n = 2; mk.a[0] = Opnd::val(ad.dst); mk.a[1] = Opnd::cst(kMemWords - 1);
+            Inst rd = ld; rd.dst = f.newVal(); rd.a[0] = Opnd::val(mk.dst);
+            out.push_back(ad); out.push_back(mk); out.push_back(rd);
+            return Opnd::val(rd.dst);
+        };
+        std::vector<Inst> first, later;
+        const Opnd v0 = readMasked(init, af.off, first);
+        const Opnd vn = readMasked(Opnd::val(iv), nf.off + af.off, later);
+        auto &pi = f.bb[pre].insts;
+        pi.insert(pi.end() - 1, first.begin(), first.end());
+        auto &bi = f.bb[B].insts;
+        bi.insert(bi.begin() + at + 1, later.begin(), later.end());
+        Phi carried; carried.dst = f.newVal();
+        carried.in = {{pre, v0}, {latch, vn}};
+        f.bb[h].phis.push_back(carried);
+        f.replaceAll(ld.dst, Opnd::val(carried.dst));
+        Inst &old = f.bb[B].insts[static_cast<size_t>(at)];
+        old.op = OP_MOV; old.n = 1; old.a[0] = Opnd::val(carried.dst);
+        clearIVRanges();
+        dce(f);
+        return true;
+    }
+    clearIVRanges();
+    return false;
 }
 
 }  // namespace kopt

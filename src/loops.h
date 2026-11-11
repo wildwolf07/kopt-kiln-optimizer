@@ -52,6 +52,10 @@ bool splitIrreducible(Func &f, int sizeBudget);
 // Unswitch loops on branches whose condition the loop never writes.
 bool unswitchLoops(Func &f, int sizeBudget);
 
+// Unswitch innermost loops on branches whose one side, once taken, stays taken
+// (the tested registers are written only behind the other side).
+bool monotoneUnswitch(Func &f, int sizeBudget);
+
 bool unrollCountedLoops(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget);
 
 bool countedUnroll(Func &f, std::vector<uint32_t> &regNames, int factor, int sizeBudget,

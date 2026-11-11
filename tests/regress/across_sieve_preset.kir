@@ -1,0 +1,37 @@
+; Sieve over flags at 1000.. whose initial words may be nonzero. The next
+; iteration's flag can be read before the marking loop: marks start at 3*i
+; and only grow, so they never write word 1000 + i + 1 (i >= 1).
+func sieve_preset(v0)
+entry:
+  and v1, v0, 63
+  add v0, v1, 2
+  const v3, 0
+  const v4, 1
+  jmp head
+head:
+  lt v5, v4, v0
+  br v5, body, exit
+body:
+  add v6, 1000, v4
+  load v7, v6
+  and v8, v7, 1
+  eq v8, v8, 0
+  br v8, mark, next
+mark:
+  add v3, v3, v4
+  mul v10, v4, 3
+  jmp ih
+ih:
+  lt v12, v10, v0
+  br v12, ib, next
+ib:
+  add v13, 1000, v10
+  store v13, v4
+  add v10, v10, v4
+  jmp ih
+next:
+  add v4, v4, 1
+  jmp head
+exit:
+  vstore 2, v3
+  ret v3

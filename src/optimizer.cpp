@@ -209,11 +209,17 @@ struct Cand {
     bool ok = false;
 };
 
+// Side trajectory (programs derived from the pipelineAcrossLoops base; their
+// names start with "across"). Seeds of the main search never come from it;
+// stages add at most one side seed after their own seeds, and its compile
+// work has a separate meter, so the main search is exactly as without it.
+inline bool sideCand(const Cand &c) { return c.what.compare(0, 6, "across") == 0; }
+
 // The best `count` candidates whose programs differ (backend variants of one
 // program often fill the top places with near-copies).
-std::vector<const Cand *> bestDistinct(const std::vector<Cand> &cands, size_t count) {
+std::vector<const Cand *> bestDistinctOf(const std::vector<Cand> &cands, size_t count, bool side) {
     std::vector<const Cand *> best;
-    for (const Cand &c : cands) if (c.ok) best.push_back(&c);
+    for (const Cand &c : cands) if (c.ok && sideCand(c) == side) best.push_back(&c);
     std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
     std::vector<const Cand *> out;
     std::vector<std::string> seen;
@@ -224,6 +230,12 @@ std::vector<const Cand *> bestDistinct(const std::vector<Cand> &cands, size_t co
         seen.push_back(text);
         out.push_back(c);
     }
+    return out;
+}
+// Seeds: the best main-search programs, then at most one side program.
+std::vector<const Cand *> bestDistinct(const std::vector<Cand> &cands, size_t count) {
+    std::vector<const Cand *> out = bestDistinctOf(cands, count, false);
+    for (const Cand *c : bestDistinctOf(cands, 2, true)) out.push_back(c);
     return out;
 }
 
@@ -296,8 +308,9 @@ Program traceLayout(const Program &p, const std::vector<Input> &inputs, bool cha
 // later stages stop trying K-name allocations, the costly part. It counts
 // work, never time, so the output is the same on every machine and run.
 size_t gCompileWork = 0;
+size_t gSideWork = 0;           // the side trajectory's own meter
 bool gWorkLimited = false;      // true from phase 2 on
-const size_t kWorkBudget = 150000;
+const size_t kWorkBudget = 150000, kSideBudget = 60000;
 
 void compileVariants(const Program &in, const Machine &m, int level, const Flags &fl, const std::string &tag,
                      bool tryK, std::vector<Cand> &out, bool plainOnly = false) {
@@ -313,7 +326,9 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
     std::vector<std::string> texts;
     auto emit = [&](bool pre, bool k, const char *suffix, bool spread = false) -> const Program * {
         if (pre && !passEnabled("preschedule")) return nullptr;
-        if (k && gWorkLimited && gCompileWork > kWorkBudget) return nullptr;
+        const bool sideWork = tag.compare(0, 6, "across") == 0;
+        size_t &meter = sideWork ? gSideWork : gCompileWork;
+        if (k && gWorkLimited && meter > (sideWork ? kSideBudget : kWorkBudget)) return nullptr;
         Func g = f;
         BackendOptions bo;
         bo.preSchedule = pre;
@@ -326,7 +341,7 @@ void compileVariants(const Program &in, const Machine &m, int level, const Flags
             c.p = lowerToProgram(g, m, bo);
         }
         if (usesUnsupported(c.p, m)) c.p = legalize(c.p, m);
-        gCompileWork += c.p.instrCount() * (k ? 3 : 1);
+        meter += c.p.instrCount() * (k ? 3 : 1);
         std::string text = printProgram(c.p);
         for (const std::string &t : texts) if (t == text) return nullptr;
         texts.push_back(text);
@@ -461,6 +476,7 @@ const size_t kSeeds = 5;   // distinct programs seeding the late stages
 std::string optimizeProgram(const std::string &origText, const Program &orig, const Machine &m,
                             const std::string &profileText, const Options &opt) {
     gCompileWork = 0;
+    gSideWork = 0;
     gWorkLimited = false;
     const Program canon = canonicalize(orig);
     const Program base = usesUnsupported(canon, m) ? legalize(canon, m) : canon;
@@ -599,6 +615,35 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             fl.tabulate = v == 8;
             compileVariants(base, m, opt.maxLevel, fl, "pipeline" + fl.name(), true, p1, effort == 0);
         }
+        // A second base when the next iteration's first load can be read
+        // before inner loops whose stores provably miss it (pipelineAcrossLoops).
+        // Only programs where that proof succeeds get these extra candidates.
+        if (effort == 2 && progSize <= 500 && passEnabled("pipeacross")) {
+            Func f; std::string err;
+            if (buildSSA(base, f, err)) {
+                Flags prepare;
+                runPipeline(f, m, opt.maxLevel, prepare);
+                int moved = 0;
+                for (int r = 0; r < 2 && pipelineAcrossLoops(f); ++r) ++moved;
+                clearIVRanges();
+                if (moved) {
+                    instSimplify(f); dce(f); simplifyCFG(f);
+                    BackendOptions initial;
+                    const Program across = lowerToProgram(f, m, initial);
+                    std::vector<Cand> side;
+                    for (int v = 0; v < nVariants; v++) {
+                        Flags fl;
+                        fl.reassoc = kVariants[v][0];
+                        fl.fuseReductions = kVariants[v][1];
+                        fl.speculate = kVariants[v][2];
+                        fl.strength = kVariants[v][3];
+                        fl.tabulate = v == 8;
+                        compileVariants(across, m, opt.maxLevel, fl, "across" + fl.name(), true, side, false);
+                    }
+                    for (Cand &c : side) p1.push_back(std::move(c));
+                }
+            }
+        }
         for (Cand &c : p1) quick(c);
         for (Cand &c : p1) cands.push_back(c);
         gWorkLimited = true;
@@ -609,7 +654,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         // Bases: the default pipeline plus the best distinct phase-1 programs (a
         // variant that wins before unrolling can lose after it, so keep several).
         std::vector<const Cand *> sorted;
-        for (const Cand &c : cands) if (c.ok) sorted.push_back(&c);
+        for (const Cand &c : cands) if (c.ok && !sideCand(c)) sorted.push_back(&c);
         std::stable_sort(sorted.begin(), sorted.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
         std::vector<const Cand *> bases;
         std::vector<std::string> seen;
@@ -622,6 +667,10 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         for (const Cand *c : sorted) if (c->what == "pipeline") addBase(c);
         const size_t maxBases = effort == 2 ? 4 : 1;
         for (const Cand *c : sorted) { if (bases.size() >= maxBases) break; addBase(c); }
+                if (effort == 2) {   // side trajectory: its default-flag program, then its best two
+            for (const Cand *c : bestDistinctOf(cands, 1000, true)) if (c->what == "across") { addBase(c); break; }
+            for (const Cand *c : bestDistinctOf(cands, 2, true)) addBase(c);
+        }
         std::vector<Program> basePrograms;
         std::vector<std::string> baseNames;
         std::vector<Flags> baseFlags;
@@ -639,6 +688,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             bool huge = false;      // also for the biggest programs (one cheap transform)
             bool headCounted = false;
             int outer = 0;          // unroll factor for top-level loop nests
+            bool msplit = false;    // monotone unswitching first
         };
         static const Plan plans[] = {
             {"unroll1", 1, 0, false, 0, false, false, true}, {"unroll2", 2, 0, false, 0, false, true}, {"unroll4", 4, 0, false, 0},
@@ -653,6 +703,9 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             {"ounroll2", 0, 0, false, 0, false, false, false, false, 2},
             {"ounroll4", 0, 0, false, 0, false, false, false, false, 4},
             {"ounroll2+unroll2", 2, 0, false, 0, false, false, false, false, 2},
+            {"msplit", 0, 0, false, 0, false, true, false, false, 0, true},
+            {"msplit+unroll2", 2, 0, false, 0, false, false, false, false, 0, true},
+            {"msplit+unroll4", 4, 0, false, 0, false, false, false, false, 0, true},
         };
         std::vector<Cand> p2;
         for (size_t bi = 0; bi < basePrograms.size(); bi++) {
@@ -668,6 +721,10 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 }
                 if (pl.unswitch) {
                     if (!unswitchLoops(rf, 2 * budget)) continue;
+                    any = true;
+                }
+                if (pl.msplit) {
+                    if (!passEnabled("msplit") || !monotoneUnswitch(rf, 2 * budget)) continue;
                     any = true;
                 }
                 if (pl.outer) {
@@ -701,7 +758,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         // Two rounds: each recompile can expose more known branches.
         for (int round = 0; round < (effort == 2 ? 2 : 0); round++) {
             std::vector<const Cand *> top;
-            for (const Cand &c : cands) if (c.ok) top.push_back(&c);
+            for (const Cand &c : cands) if (c.ok && !sideCand(c)) top.push_back(&c);
             std::stable_sort(top.begin(), top.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
             // Distinct programs only (backend variants of one program count once).
             std::vector<const Cand *> distinct;
@@ -905,10 +962,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     }
     if (effort == 2 && passEnabled("tracelayout")) {
         std::vector<const Cand *> best;
-        for (const Cand &c : cands) if (c.ok) best.push_back(&c);
+        for (const Cand &c : cands) if (c.ok && !sideCand(c)) best.push_back(&c);
         std::stable_sort(best.begin(), best.end(), [](const Cand *a, const Cand *b) { return a->cycles < b->cycles; });
+        if (best.size() > 8) best.resize(8);
+        for (const Cand *c : bestDistinctOf(cands, 1, true)) best.push_back(c);
         std::vector<Cand> layouts;
-        for (size_t i = 0; i < std::min<size_t>(8, best.size()); i++) {
+        for (size_t i = 0; i < best.size(); i++) {
             for (bool chains : {true, false}) {
                 Cand c;
                 c.p = traceLayout(best[i]->p, inputs, chains);
