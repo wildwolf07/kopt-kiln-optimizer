@@ -1394,6 +1394,33 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         for (Cand &c : hoisted)
             if (c.ok && (incumbent == UINT64_MAX || c.cycles * 1000 < incumbent * 995)) cands.push_back(std::move(c));
     }
+    // Register-touch polishing when the program names more registers than the
+    // machine keeps resident: commutative operand order and `mov r, r`
+    // touches choose which value the hardware evicts. Exact-model search with
+    // a deterministic evaluation budget.
+    if (effort == 2 && passEnabled("lrupolish")) {
+        const auto seeds = bestDistinct(cands, 2);
+        std::vector<Cand> polished;
+        size_t steps = 0;
+        for (const Cand *seed : seeds) {
+            if (registerNames(seed->p) <= static_cast<size_t>(m.registers)) continue;
+            const size_t size = seed->p.instrCount();
+            if (size > 400) continue;
+            // Budget in candidate evaluations, scaled down for larger programs.
+            const size_t evals = std::min<size_t>(1500, 60000 / (size + 20));
+            if (steps + evals > 3000) continue;
+            steps += evals;
+            auto eval = [&](const Program &q) {
+                Cand c; c.p = q; quick(c);
+                return c.ok ? c.cycles : UINT64_MAX;
+            };
+            Program q = lruPolish(seed->p, eval, evals);
+            if (printProgram(q) == printProgram(seed->p)) continue;
+            Cand c; c.p = std::move(q); c.flags = seed->flags; c.what = seed->what + "/lru";
+            quick(c); polished.push_back(std::move(c));
+        }
+        for (Cand &c : polished) cands.push_back(std::move(c));
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

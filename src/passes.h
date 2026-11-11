@@ -6,6 +6,8 @@
 #include "ir.h"
 #include "sim.h"
 
+#include <functional>
+
 namespace kopt {
 
 // Evaluate a pure instruction on constants. Returns false if it would trap or is
@@ -59,6 +61,9 @@ bool packIndexedCounts(Func &f);
 bool factorSelects(Func &f);
 bool hoistPureArms(Func &f, int budget);
 bool hoistToIdom(Func &f, int budget);
+size_t registerNames(const Program &p);
+Program lruPolish(const Program &input, const std::function<uint64_t(const Program &)> &cost,
+                  size_t evaluations);
 std::vector<Program> rowPairAlternatives(const Program &in);
 bool promoteRollingLoad(Func &f);
 bool finiteInputMasksUpTo(const Program &in, std::vector<uint32_t> &masks, unsigned maxBits);
