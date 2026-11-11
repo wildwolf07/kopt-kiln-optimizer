@@ -1,3 +1,62 @@
+# Packed indexed counts
+
+Comparison against main `64ce095` on the same public programs, machines and
+inputs. The candidate pass keeps 2, 4 or 8 counters in at most two registers,
+then applies their deltas at the loop exit. It uses a source-derived proof
+of the trip bound, address validity, disjointness and effects.
+
+| Scope | Main cycles | Packed candidate cycles |
+|---|---:|---:|
+| Histogram, slow-memory sample | 587 | 434 |
+| Histogram, slow-memory held-out | 2,657 | 2,136 |
+| Slow-memory suite, sample total | 13,351 | 13,198 |
+| Slow-memory suite, held-out total | 80,350 | 79,829 |
+
+The full suite passed all 500 program and machine pairs with 100 generated
+inputs per pair, strict candidate checks and repeat-output checks. Held-out
+scoring starts at offset 40. The histogram improvement was the sole cycle
+change in both the sample and held-out comparisons.
+
+Eight generated kernels varied bin counts, memory addresses, masked trip
+bounds, initial bin values and exit behavior. In the paired runs on all five
+machines, 25 pairs improved and 15 tied. Aggregate generated-case cycle
+reductions were 25.7% on default, 13.4% on few_registers, 23.4% on no_fused,
+44.8% on slow_memory and 18.0% on wide_fast. All 1,359 emitted packed
+candidates passed 54,360 independent interpreter comparisons, covering
+initial values that wrap, concentrated counts and a trap after writeback.
+
+A slow-memory sweep across lengths 0 through 63 found 58 faster lengths
+and six slower short lengths, with 38,816 → 29,185 total cycles. The fixed
+writeback makes an empty histogram cost 60 cycles instead of 8 in this
+candidate. The compiler selects the packed form based on aggregate simulated
+cycles.
+
+On the loaded Mac, the slowest compiler CPU time across the public suite
+was 0.993 seconds and the maximum observed wall time was 5.27 seconds.
+Selected normal cases on a pinned Linux VM CPU completed in under two seconds.
+Both 100k-instruction stress inputs produced byte-identical outputs to main,
+with wall times of 2.93 and 11.63 seconds. The judge limit uses wall time.
+
+The frozen build passed 3,000 strict fuzz programs, 500 metamorphic
+programs, 44 regressions, 100 mutation cases, and all 18 root test suites.
+The direct packed-counter tests passed 3,520 comparisons and the sanitizer
+run passed 3,360 comparisons. The unseen-machine sweep covered 1,200 pairs
+with zero slowdowns against the input programs and zero wrapper fallbacks.
+Source hashes and measured results are recorded in
+`results/bins-validation.json`.
+
+Reproduce the public comparison and direct proof checks with:
+
+```sh
+./build.sh
+KOPT_STRICT=1 KOPT_EXEC="$PWD/build/kopt-bin" python3 tools/bench.py \
+  --machines all --random 100 --score-offset 40 --timeout 180 \
+  --compare results/stream-sample-cycles.json --report /tmp/packed-report.json
+python3 tests/packed_counts.py
+```
+
+---
+
 # optimizer-stream validation
 
 Based on main `a3e67fe`, in its own branch and worktree. Adds exact rolling

@@ -32,18 +32,16 @@ range-cache lifetime fix. The `optimizer-apex` branch builds on `dac7d75`: large
 coalescing and local analysis refresh reduce compile work; backward bit-demand
 proofs and packed lookup alternatives cover additional finite computations.
 The vector stage adds exact bit-affine synthesis and final layout polishing.
-This `optimizer-stream` branch starts from integrated main `a3e67fe`, preserving
-its later speculation and store rewrites. It adds the previously validated wide
-finite-domain and constant-load splitting candidates, followed by exact rolling
-load reuse with bounded unrolling and scheduling alternatives. Other active
-worktrees are not modified.
+Integrated main `64ce095` includes wide finite-domain specialization,
+constant-load splitting, and exact rolling load reuse. This branch adds
+packed counters for bounded indexed increments.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
 | default | 103,671 | 16,527 | 8,973 | 11.55x |
 | few_registers | 202,164 | 25,592 | 13,978 | 14.46x |
 | no_fused | 107,966 | 20,218 | 10,847 | 9.95x |
-| slow_memory | 111,254 | 24,319 | 13,351 | 8.33x |
+| slow_memory | 111,254 | 24,319 | 13,198 | 8.43x |
 | wide_fast | 55,744 | 12,923 | 6,860 | 8.13x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
@@ -79,6 +77,7 @@ CXX=clang++ python3 tests/arithmetic_compact.py
 CXX=clang++ python3 tests/signed_pow2.py
 CXX=clang++ python3 tests/counted_loops.py --integrated-bin build/kopt-bin
 python3 tests/unswitch_pipeline.py
+python3 tests/packed_counts.py
 ```
 
 The fuzzer includes conditional pointer cursors, counted recurrences and
