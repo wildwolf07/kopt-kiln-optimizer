@@ -1335,6 +1335,50 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : pairs) cands.push_back(std::move(c));
     }
+    // Partially dead stores: a store overwritten on one successor path moves
+    // to the other edge. Final-only, own budget.
+    if (effort == 2 && passEnabled("deadstores")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> sunk;
+        size_t work = 0;
+        for (const Cand *seed : seeds) {
+            if (seed->p.instrCount() > 1500 || work + seed->p.instrCount() > 6000) continue;
+            bool stores = false;
+            for (const Block &b : seed->p.blocks) for (const Instr &x : b.ins) if (x.op == OP_STORE) stores = true;
+            if (!stores) continue;
+            work += seed->p.instrCount();
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f);
+            if (!sinkDeadStores(f)) continue;
+            dce(f);
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; ++mode) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo;
+                bo.preSchedule = mode != 0;
+                bo.bottomUpSchedule = mode == 2;
+                bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.flags = seed->flags;
+                c.what = seed->what + "/deadstore" + std::to_string(mode);
+                quick(c); sunk.push_back(std::move(c));
+            }
+        }
+        int best = -1;
+        for (size_t i = 0; i < sunk.size(); ++i)
+            if (sunk[i].ok && (best < 0 || sunk[i].cycles < sunk[best].cycles)) best = static_cast<int>(i);
+        if (best >= 0) {
+            const Cand top = sunk[best];
+            for (bool chains : {true, false}) {
+                Cand c; c.p = traceLayout(top.p, inputs, chains);
+                c.flags = top.flags; c.what = top.what + (chains ? "/trace" : "/hot");
+                quick(c); sunk.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : sunk) cands.push_back(std::move(c));
+    }
     // Join hoisting: empty pure branch arms into the branch block and move
     // pure join work above the branch, so loop tests and counters no longer
     // wait behind an effectful arm. Final-only, own deterministic budget.

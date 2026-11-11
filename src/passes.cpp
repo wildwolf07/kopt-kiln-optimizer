@@ -4843,4 +4843,177 @@ bool pipelineAcrossLoops(Func &f) {
     return false;
 }
 
+
+// ---------------------------------------------------------------------------
+// Partially dead stores. A store whose word is written again on one successor
+// path, before anything can read that word or stop the program, is dead on
+// that path. It moves to the other successor edge (or disappears when every
+// successor overwrites it). Typical case: an unrolled bubble pass stores
+// a[j+1] and the next step stores a[j+1] again.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct WordForm {
+    bool hasBase = false;
+    Val base = -1;
+    uint32_t off = 0;
+    bool fresh = false;   // base recomputed in the entered block: a new instance
+};
+
+// Word written or read by address `a`. With from >= 0, `a` is evaluated on
+// entry to block `to` from block `from`, after the program passed from the
+// store's block to `from`: phis of `to` take their values on that edge (values
+// of the earlier frame), values defined in `to` itself are new instances, and
+// other values are unchanged. Every returned base names an earlier-frame value.
+WordForm wordForm(const Func &f, const std::vector<DefSite> &ds, Opnd a, int to, int from) {
+    auto plain = [&](Opnd v) {
+        if (v.isConst) return WordForm{false, -1, v.c};
+        const Inst *x = defInst(f, ds, v);
+        if (x && x->op == OP_ADD && x->a[1].isConst && !x->a[0].isConst) return WordForm{true, x->a[0].v, x->a[1].c};
+        if (x && x->op == OP_ADD && x->a[0].isConst && !x->a[1].isConst) return WordForm{true, x->a[1].v, x->a[0].c};
+        return WordForm{true, v.v, 0};
+    };
+    if (from < 0 || a.isConst) return plain(a);
+    auto incoming = [&](Val v, Opnd &out) {
+        for (const Phi &ph : f.bb[to].phis)
+            if (ph.dst == v) {
+                for (const auto &in : ph.in) if (in.first == from) { out = in.second; return true; }
+                return false;
+            }
+        return false;
+    };
+    auto local = [&](Val v) { return v >= 0 && v < static_cast<int>(ds.size()) && ds[v].block == to; };
+    WordForm unknown{true, a.v, 0, true};
+    Opnd mapped;
+    if (incoming(a.v, mapped)) return plain(mapped);
+    if (!local(a.v)) return plain(a);
+    const Inst *x = defInst(f, ds, a);
+    if (!x || x->op != OP_ADD) return unknown;
+    Opnd base; uint32_t off;
+    if (x->a[1].isConst && !x->a[0].isConst) { base = x->a[0]; off = x->a[1].c; }
+    else if (x->a[0].isConst && !x->a[1].isConst) { base = x->a[1]; off = x->a[0].c; }
+    else return unknown;
+    if (incoming(base.v, mapped)) {
+        WordForm w = plain(mapped);
+        w.off += off;
+        return w;
+    }
+    if (local(base.v)) return unknown;
+    return WordForm{true, base.v, off};
+}
+
+bool inMemory(const Func &f, const std::vector<DefSite> &ds, Opnd a) {
+    if (a.isConst) return a.c < kMemWords;
+    const Inst *x = defInst(f, ds, a);
+    if (x && x->op == OP_AND && ((x->a[1].isConst && x->a[1].c < kMemWords) || (x->a[0].isConst && x->a[0].c < kMemWords))) return true;
+    return rangeOf(f, ds, a, 8).hi < kMemWords;
+}
+
+}  // namespace
+
+bool sinkDeadStores(Func &f) {
+    if (f.bb.size() > 400) return false;
+    f.resolveAll();
+    f.rebuildPreds();
+    clearIVRanges();
+    computeIVRanges(f);
+    computeVRP(f);
+    bool changed = false;
+    for (int round = 0; round < 4; ++round) {
+        bool any = false;
+        std::vector<DefSite> ds = defSites(f);
+        for (int b = 0; b < static_cast<int>(f.bb.size()) && !any; ++b) {
+            BB &B = f.bb[b];
+            if (!B.alive) continue;
+            for (size_t i = 0; i + 1 < B.insts.size() && !any; ++i) {
+                const Inst st = B.insts[i];
+                if (st.op != OP_STORE) continue;
+                const Opnd addr = f.resolve(st.a[0]);
+                const WordForm w = wordForm(f, ds, addr, b, -1);
+                const Range wr = rangeOf(f, ds, addr, 6);
+                // Can instruction x (seen in block `blk`, entered from `from`)
+                // touch word w or stop the program? Sets `over` when x is a
+                // store that certainly writes w.
+                auto blocker = [&](const Inst &x, int blk, int from, bool &over) {
+                    over = false;
+                    switch (x.op) {
+                    case OP_LOAD: case OP_STORE: {
+                        const Opnd a = f.resolve(x.a[0]);
+                        const WordForm v = wordForm(f, ds, a, blk, from);
+                        if (!v.fresh && v.hasBase == w.hasBase && (!v.hasBase || v.base == w.base)) {
+                            if (v.off == w.off) { over = x.op == OP_STORE; return x.op == OP_LOAD; }
+                            return !inMemory(f, ds, a);
+                        }
+                        const Range r = rangeOf(f, ds, a, 6);
+                        if (!(r.hi < wr.lo || wr.hi < r.lo)) return true;
+                        return !inMemory(f, ds, a);
+                    }
+                    case OP_DIV: case OP_MOD:
+                        return rangeOf(f, ds, x.a[1], 8).lo < 1;
+                    case OP_VLOAD: case OP_VSTORE: case OP_TRAP: case OP_RET:
+                        return true;
+                    default:
+                        return false;
+                    }
+                };
+                // The rest of B must let the store move past it.
+                bool movable = true;
+                for (size_t k = i + 1; k + 1 < B.insts.size() && movable; ++k) {
+                    bool over;
+                    if (blocker(B.insts[k], b, -1, over) || over) movable = false;
+                }
+                if (!movable) continue;
+                const Inst &term = B.term();
+                std::vector<int> succ;
+                if (term.op == OP_JMP) succ = {term.tgt[0]};
+                else if (term.op == OP_BR && term.tgt[0] != term.tgt[1]) succ = {term.tgt[0], term.tgt[1]};
+                else continue;
+                // Is the word overwritten on the path through successor s?
+                auto overwritten = [&](int s) {
+                    int from = b, blk = s;
+                    for (int hop = 0; hop < 2; ++hop) {
+                        const BB &C = f.bb[blk];
+                        if (!C.alive || blk == b) return false;
+                        for (size_t k = 0; k + 1 < C.insts.size(); ++k) {
+                            bool over;
+                            if (blocker(C.insts[k], blk, from, over)) return false;
+                            if (over) return true;
+                        }
+                        // Pass only through an empty jump block without phis.
+                        if (C.insts.size() != 1 || C.term().op != OP_JMP || !C.phis.empty()) return false;
+                        from = blk;
+                        blk = C.term().tgt[0];
+                    }
+                    return false;
+                };
+                std::vector<int> keep;
+                for (int s : succ) if (!overwritten(s)) keep.push_back(s);
+                if (keep.size() == succ.size()) continue;
+                B.insts.erase(B.insts.begin() + i);
+                for (int s : keep) {
+                    // A fresh edge block keeps the store off the overwriting path.
+                    BB e;
+                    e.freq = f.bb[s].freq;
+                    e.loopDepth = f.bb[s].loopDepth;
+                    e.insts.push_back(st);
+                    Inst j; j.op = OP_JMP; j.tgt[0] = s;
+                    e.insts.push_back(j);
+                    const int id = static_cast<int>(f.bb.size());
+                    f.bb.push_back(std::move(e));
+                    BB &P = f.bb[b];
+                    for (int t = 0; t < 2; ++t) if (P.term().tgt[t] == s) P.term().tgt[t] = id;
+                    for (Phi &ph : f.bb[s].phis)
+                        for (auto &in : ph.in) if (in.first == b) in.first = id;
+                }
+                f.rebuildPreds();
+                any = changed = true;
+            }
+        }
+        if (!any) break;
+    }
+    clearIVRanges();
+    return changed;
+}
+
 }  // namespace kopt
