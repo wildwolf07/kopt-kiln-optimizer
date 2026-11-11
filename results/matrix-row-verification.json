@@ -1,0 +1,43 @@
+{
+  "test_sha256": "79f4630c84688417923d1c7491f52cc3e54b5389a5a703b5cfc6857a0d2f20a2",
+  "direct": {
+    "fixtures": 376,
+    "accepted": 328,
+    "comparisons": 84960,
+    "oracle": "official kirlib",
+    "evidence": "build/row-pairs-final-direct/evidence.json"
+  },
+  "fuzz": {
+    "fixtures": 500,
+    "accepted": 171,
+    "comparisons": 122560,
+    "oracle": "official kirlib",
+    "evidence": "build/row-pairs-direct/fuzz-931671.json"
+  },
+  "sanitizers": {
+    "fixtures": 87,
+    "accepted": 39,
+    "comparisons": 37440,
+    "oracle": "local Sim",
+    "evidence": "build/row-pairs-sanitize/local.json"
+  },
+  "focus": {
+    "slow_memory_sample": [
+      99,
+      97
+    ],
+    "slow_memory_heldout": [
+      3132,
+      2370
+    ],
+    "other_machines": "tie",
+    "winner": "rowpairs0/2",
+    "max_cpu_seconds": [
+      0.268035,
+      0.270466
+    ],
+    "note": "Standalone focus measurement. Combined frozen measurements are in matrix-validation.json."
+  },
+  "scope": "Independent row_pairs.cpp module proof checks. Integrated optimizer stage is covered by matrix-validation.json.",
+  "module_sha256": "0fea785290100de2802ab0e863891cfceb6cde17d4b51bf12ed8f0537bed0c91"
+}

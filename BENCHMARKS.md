@@ -1,3 +1,79 @@
+# optimizer-matrix validation
+
+This candidate starts from main `9316fa7`, includes the validated packed
+counter pass `64abe81`, and adds select factoring and paired-row matrix/vector
+reuse. Both new stages append alternatives after the earlier searches.
+
+| Machine | Packed sample | Matrix sample | Packed held-out | Matrix held-out | Matrix held-out geo |
+|---|---:|---:|---:|---:|---:|
+| default | 8,712 | 8,700 | 50,290 | 50,229 | 7.652 |
+| few_registers | 13,894 | 13,846 | 83,198 | 82,938 | 11.327 |
+| no_fused | 10,427 | 10,403 | 60,447 | 60,317 | 7.012 |
+| slow_memory | 12,376 | 12,372 | 75,567 | 74,790 | 6.701 |
+| wide_fast | 6,814 | 6,809 | 38,965 | 38,936 | 5.342 |
+
+All 500 public pairs passed strict candidate checks, sample plus 100 generated
+inputs, feature checks and repeat determinism. Six pairs improve and 494 tie
+in both sample and held-out cycles. The changes comprise select factoring on
+`branchy_select` for all five machines, and paired-row reuse on `matvec8`
+for slow_memory.
+
+| Kernel and machine | Sample before → after | Held-out before → after |
+|---|---:|---:|
+| branchy_select, default | 159 → 147 | 890 → 829 |
+| branchy_select, few_registers | 399 → 351 | 2,200 → 1,940 |
+| branchy_select, no_fused | 171 → 147 | 952 → 822 |
+| branchy_select, slow_memory | 266 → 264 | 1,551 → 1,536 |
+| branchy_select, wide_fast | 95 → 90 | 597 → 568 |
+| matvec8, slow_memory | 99 → 97 | 3,132 → 2,370 |
+
+The matrix-vector kernel improved for all eight reachable row counts on
+slow_memory. For 1 through 8 rows, the before/after cycles were
+99/97, 189/141, 279/230, 369/274, 459/363, 549/407, 639/496 and 729/540.
+
+Eight generated matrix/vector kernels varied widths from 2 through 16,
+row strides, memory bases and return values. Forty pairs across the five
+machines passed behavior checks. Every emitted row-pair candidate was checked,
+for 39,543 independent official comparisons. Fourteen timing pairs improve,
+23 tie and three regress. Aggregate totals improve on default, no_fused,
+slow_memory and wide_fast, and tie on few_registers.
+
+| Generated machine | Before cycles | After cycles |
+|---|---:|---:|
+| default | 38,955 | 36,282 |
+| few_registers | 55,140 | 55,140 |
+| no_fused | 55,101 | 53,142 |
+| slow_memory | 66,765 | 58,497 |
+| wide_fast | 20,220 | 19,770 |
+
+Generated timing regressions were 1,458 → 1,464 for width 2 on no_fused,
+4,104 → 4,116 for width 4 on slow_memory, and 2,730 → 2,904 for width 8
+on wide_fast. The candidate ranking uses fixed training inputs, so different
+trip-count distributions can favor a different version.
+
+Maximum compiler CPU time across the public suite was 1.058 s on the Mac,
+with a maximum observed parallel wall time of 4.17 s. The selected cases on
+one pinned Linux VM CPU completed within 1.43 s wall time. The 100k-instruction
+straight and loop stress cases took 3.05 and 9.14 s and produced byte-identical
+output to the validated packed baseline.
+
+The frozen combined build passed 3,000 strict fuzz programs, 500 metamorphic
+programs, 46 regressions, 100 mutation cases with equal cycle totals, and
+300 further fuzz programs under ASan and UBSan. Smoke checks passed 50 pairs
+and four negative controls. All 1,200 unseen-machine checks passed with zero
+outputs slower than the input and zero wrapper fallbacks.
+
+The paired-row module separately passed 84,960 independent official
+comparisons over 376 proof fixtures and 122,560 more over 500 generated
+sources. Its sanitizer checks covered another 37,440 local comparisons.
+Both new proof suites have kit-free modes for Ubuntu 22.04/g++11 CI.
+All 22 root test suites passed against unchanged production source and binary
+hashes. Select factoring passed 56,576 official comparisons over 64 fixtures
+and four lowerings, plus 71,936 local comparisons. The complete manifest is
+`results/matrix-validation.json`.
+
+---
+
 # optimizer-packed validation
 
 The packed-counter pass from `2541b59` is applied on main `9316fa7`, which

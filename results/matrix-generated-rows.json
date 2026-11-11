@@ -1,0 +1,365 @@
+{
+  "rows": [
+    {
+      "case": 0,
+      "columns": 2,
+      "machine": "default",
+      "before": 1392,
+      "after": 1308,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 0,
+      "columns": 2,
+      "machine": "few_registers",
+      "before": 2370,
+      "after": 2370,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 0,
+      "columns": 2,
+      "machine": "no_fused",
+      "before": 1458,
+      "after": 1464,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 0,
+      "columns": 2,
+      "machine": "slow_memory",
+      "before": 1617,
+      "after": 1617,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 0,
+      "columns": 2,
+      "machine": "wide_fast",
+      "before": 807,
+      "after": 807,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 1,
+      "columns": 3,
+      "machine": "default",
+      "before": 1761,
+      "after": 1761,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 1,
+      "columns": 3,
+      "machine": "few_registers",
+      "before": 4113,
+      "after": 4113,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 1,
+      "columns": 3,
+      "machine": "no_fused",
+      "before": 1884,
+      "after": 1884,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 1,
+      "columns": 3,
+      "machine": "slow_memory",
+      "before": 3243,
+      "after": 3243,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 1,
+      "columns": 3,
+      "machine": "wide_fast",
+      "before": 1317,
+      "after": 1155,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 2,
+      "columns": 4,
+      "machine": "default",
+      "before": 2217,
+      "after": 2121,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 2,
+      "columns": 4,
+      "machine": "few_registers",
+      "before": 4068,
+      "after": 4068,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 2,
+      "columns": 4,
+      "machine": "no_fused",
+      "before": 2838,
+      "after": 2838,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 2,
+      "columns": 4,
+      "machine": "slow_memory",
+      "before": 4104,
+      "after": 4116,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 2,
+      "columns": 4,
+      "machine": "wide_fast",
+      "before": 1518,
+      "after": 1362,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 3,
+      "columns": 5,
+      "machine": "default",
+      "before": 3156,
+      "after": 3156,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 3,
+      "columns": 5,
+      "machine": "few_registers",
+      "before": 4836,
+      "after": 4836,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 3,
+      "columns": 5,
+      "machine": "no_fused",
+      "before": 4689,
+      "after": 4689,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 3,
+      "columns": 5,
+      "machine": "slow_memory",
+      "before": 6936,
+      "after": 5259,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 3,
+      "columns": 5,
+      "machine": "wide_fast",
+      "before": 1752,
+      "after": 1602,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 4,
+      "columns": 7,
+      "machine": "default",
+      "before": 4389,
+      "after": 3438,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 4,
+      "columns": 7,
+      "machine": "few_registers",
+      "before": 6678,
+      "after": 6678,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 4,
+      "columns": 7,
+      "machine": "no_fused",
+      "before": 6138,
+      "after": 6138,
+      "candidates": 49,
+      "inputs": 21
+    },
+    {
+      "case": 4,
+      "columns": 7,
+      "machine": "slow_memory",
+      "before": 8673,
+      "after": 6594,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 4,
+      "columns": 7,
+      "machine": "wide_fast",
+      "before": 2436,
+      "after": 2280,
+      "candidates": 54,
+      "inputs": 21
+    },
+    {
+      "case": 5,
+      "columns": 8,
+      "machine": "default",
+      "before": 5538,
+      "after": 5538,
+      "candidates": 49,
+      "inputs": 21
+    },
+    {
+      "case": 5,
+      "columns": 8,
+      "machine": "few_registers",
+      "before": 7050,
+      "after": 7050,
+      "candidates": 49,
+      "inputs": 21
+    },
+    {
+      "case": 5,
+      "columns": 8,
+      "machine": "no_fused",
+      "before": 8121,
+      "after": 8121,
+      "candidates": 41,
+      "inputs": 21
+    },
+    {
+      "case": 5,
+      "columns": 8,
+      "machine": "slow_memory",
+      "before": 9921,
+      "after": 8310,
+      "candidates": 49,
+      "inputs": 21
+    },
+    {
+      "case": 5,
+      "columns": 8,
+      "machine": "wide_fast",
+      "before": 2730,
+      "after": 2904,
+      "candidates": 49,
+      "inputs": 21
+    },
+    {
+      "case": 6,
+      "columns": 12,
+      "machine": "default",
+      "before": 8910,
+      "after": 7368,
+      "candidates": 35,
+      "inputs": 21
+    },
+    {
+      "case": 6,
+      "columns": 12,
+      "machine": "few_registers",
+      "before": 10116,
+      "after": 10116,
+      "candidates": 35,
+      "inputs": 21
+    },
+    {
+      "case": 6,
+      "columns": 12,
+      "machine": "no_fused",
+      "before": 11430,
+      "after": 11430,
+      "candidates": 31,
+      "inputs": 21
+    },
+    {
+      "case": 6,
+      "columns": 12,
+      "machine": "slow_memory",
+      "before": 13956,
+      "after": 12096,
+      "candidates": 35,
+      "inputs": 21
+    },
+    {
+      "case": 6,
+      "columns": 12,
+      "machine": "wide_fast",
+      "before": 3894,
+      "after": 3894,
+      "candidates": 35,
+      "inputs": 21
+    },
+    {
+      "case": 7,
+      "columns": 16,
+      "machine": "default",
+      "before": 11592,
+      "after": 11592,
+      "candidates": 26,
+      "inputs": 21
+    },
+    {
+      "case": 7,
+      "columns": 16,
+      "machine": "few_registers",
+      "before": 15909,
+      "after": 15909,
+      "candidates": 26,
+      "inputs": 21
+    },
+    {
+      "case": 7,
+      "columns": 16,
+      "machine": "no_fused",
+      "before": 18543,
+      "after": 16578,
+      "candidates": 26,
+      "inputs": 21
+    },
+    {
+      "case": 7,
+      "columns": 16,
+      "machine": "slow_memory",
+      "before": 18315,
+      "after": 17262,
+      "candidates": 26,
+      "inputs": 21
+    },
+    {
+      "case": 7,
+      "columns": 16,
+      "machine": "wide_fast",
+      "before": 5766,
+      "after": 5766,
+      "candidates": 26,
+      "inputs": 21
+    }
+  ],
+  "comparisons": 39543
+}

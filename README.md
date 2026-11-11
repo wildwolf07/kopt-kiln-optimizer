@@ -39,15 +39,16 @@ load reuse with bounded unrolling and scheduling alternatives. The
 `optimizer-sieve` branch adds cross-iteration load pipelining over inner loops
 (as a separate candidate trajectory) and monotone loop unswitching. The
 `optimizer-packed` branch builds on that revision with packed counters for
-bounded indexed increments.
+bounded indexed increments. The `optimizer-matrix` candidate adds select
+factoring and paired-row matrix/vector reuse.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 8,712 | 11.90x |
-| few_registers | 202,164 | 25,592 | 13,894 | 14.55x |
-| no_fused | 107,966 | 20,218 | 10,427 | 10.35x |
-| slow_memory | 111,254 | 24,319 | 12,376 | 8.99x |
-| wide_fast | 55,744 | 12,923 | 6,814 | 8.18x |
+| default | 103,671 | 16,527 | 8,700 | 11.92x |
+| few_registers | 202,164 | 25,592 | 13,846 | 14.60x |
+| no_fused | 107,966 | 20,218 | 10,403 | 10.38x |
+| slow_memory | 111,254 | 24,319 | 12,372 | 8.99x |
+| wide_fast | 55,744 | 12,923 | 6,809 | 8.19x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
 additional inputs, and optimized twice for determinism. Individual programs can
@@ -64,6 +65,8 @@ python3 tests/wide_finite.py --kit-free
 python3 tests/load_rematerialize.py --kit-free
 python3 tests/rolling_load.py --kit-free
 python3 tests/packed_counts.py --kit-free
+python3 tests/select_factor.py --kit-free
+python3 tests/row_pairs.py --kit-free --quick
 ```
 
 The smoke suite covers arithmetic, loops, guarded division, memory, scratch,

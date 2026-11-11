@@ -50,3 +50,11 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/packed_counts.py --kit-free
+      - name: Check select factoring semantics and bounds
+        env:
+          CXX: g++-11
+        run: python3 tests/select_factor.py --kit-free
+      - name: Check paired-row proof gates and odd tails
+        env:
+          CXX: g++-11
+        run: python3 tests/row_pairs.py --kit-free --quick

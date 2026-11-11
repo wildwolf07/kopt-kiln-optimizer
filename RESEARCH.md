@@ -165,3 +165,25 @@ two dot products. With the inner loop retained, the slow-memory held-out
 total fell from 3,132 to 2,356 cycles. Register pressure and control overhead
 made the same loop slower on the other four machines in that experiment.
 The measured packed-counter branch ships independently of this experiment.
+
+The matrix stage implements a bounded form of unroll-and-jam: compute two
+output rows together so their inner loops reuse the vector element. The
+general transformation is described in [GCC's optimization options](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html#index-floop-unroll-and-jam).
+This implementation reconstructs only a proved small nested-loop recipe from
+the supplied SSA. It proves the memory ranges disjoint and valid before
+changing load or store order. It imports no external optimizer code.
+
+Select factoring uses the function identity
+`select(c, f(x,a), f(x,b)) = f(x, select(c,a,b))` for total KIR operations.
+The operand alignment must preserve SUB, shifts, signed LT, SELECT and
+ADDSH ordering. The existing argument order can be swapped only for ADD, MUL,
+bitwise operations, EQ, or the two multiplicands of MAC. DIV/MOD, memory and
+volatile operations are outside the rewrite. A snapshot of original
+definitions retains their equivalent meanings, and DCE reconstructs actual
+liveness after the changes. New source and target programs are tested through
+the independent official interpreter.
+
+A direct counter-based bracket-depth rewrite was evaluated and deferred.
+It replaced the maximum update with an increment when the depth equaled the
+previous maximum. The extra predicates and live values increased held-out
+cycles on four of five machines.

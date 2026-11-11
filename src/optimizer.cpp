@@ -1242,6 +1242,99 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         }
     }
+    if (effort == 2 && passEnabled("selectfactor")) {
+        const auto seeds = bestDistinct(cands, 3);
+        std::vector<Cand> factored;
+        size_t work = 0;
+        for (const Cand *seed : seeds) {
+            if (seed->p.instrCount() > 500) continue;
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err) || !factorSelects(f)) continue;
+            size_t size = 0;
+            for (const BB &block : f.bb) if (block.alive) size += block.insts.size();
+            if (work + 4 * size > 2000) continue;
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; ++mode) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo;
+                bo.preSchedule = mode != 0;
+                bo.bottomUpSchedule = mode == 2;
+                bo.spillToK = mode == 3;
+                Cand c;
+                c.p = lowerToProgram(copy, m, bo);
+                c.flags = seed->flags;
+                c.what = seed->what + "/selectfactor" + std::to_string(mode);
+                quick(c);
+                factored.push_back(std::move(c));
+                work += size;
+            }
+        }
+        for (Cand &c : factored) cands.push_back(std::move(c));
+    }
+    // Two-row reuse, final-only and independently budgeted.
+    if (effort == 2 && progSize <= 160 && passEnabled("rowpairs")) {
+        const auto recipes = rowPairAlternatives(base);
+        size_t work = 0;
+        std::vector<Cand> pairs;
+        auto emitPairs = [&](Func &ir, const Flags &fl, const std::string &tag, std::vector<Cand> &out) {
+            size_t units = 0;
+            for (const BB &b : ir.bb) if (b.alive) {
+                units += b.insts.size();
+                for (const Phi &ph : b.phis) units += ph.in.size();
+            }
+            if (units > 600) return;
+            const bool scratch = canSpillToScratch(ir);
+            for (int mode = 0; mode < 4; ++mode) {
+                if (mode == 3 && !scratch) continue;
+                const size_t cost = units * (mode == 3 ? 3 : 1);
+                if (work + cost > 6000) continue;
+                work += cost;
+                Func f = ir; BackendOptions bo;
+                bo.preSchedule = mode != 0; bo.bottomUpSchedule = mode >= 2; bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(f, m, bo); c.flags = fl;
+                c.what = tag + "/" + std::to_string(mode);
+                quick(c); out.push_back(std::move(c));
+            }
+        };
+        // Peeling exposes a bounded constant inner loop to the usual cleanup;
+        // both the rolled and fully unrolled structural recipes remain options.
+        for (int plan : {0, 1, 2, 3}) {
+            if (recipes.empty()) break;
+            Program p = recipes[plan == 1 ? 1 : 0];
+            if (plan == 0 || plan == 3) {
+                std::vector<uint32_t> names; Func rf = toRegisterForm(p, names);
+                if (!peelLoops(rf, plan == 0 ? 8 : 16, 600)) continue;
+                p = fromRegisterForm(rf, names);
+            }
+            if (work >= 4000 || p.instrCount() > 600 || work + p.instrCount() > 6000) continue;
+            work += p.instrCount();
+            Func ir; std::string err;
+            if (!buildSSA(p, ir, err)) continue;
+            Flags fl; fl.reassoc = false; fl.fuseReductions = true;
+            runPipeline(ir, m, opt.maxLevel, fl);
+            emitPairs(ir, fl, "rowpairs" + std::to_string(plan), pairs);
+        }
+        const auto seeds = bestDistinctOf(pairs, 2, false);
+        std::vector<Cand> advanced;
+        for (const Cand *seed : seeds) {
+            Func ir; std::string err;
+            if (work + seed->p.instrCount() > 6000 || !buildSSA(seed->p, ir, err)) continue;
+            work += seed->p.instrCount();
+            Flags fl = seed->flags; fl.speculate = true; fl.specLoadsOnly = true;
+            runPipeline(ir, m, opt.maxLevel, fl);
+            emitPairs(ir, fl, seed->what + "/specL", advanced);
+        }
+        for (Cand &c : advanced) pairs.push_back(std::move(c));
+        const size_t count = pairs.size();
+        for (size_t i = 0; i < count; ++i) for (bool chains : {true,false}) {
+            if (work + pairs[i].p.instrCount() > 6000) continue;
+            work += pairs[i].p.instrCount();
+            Cand c; c.p = traceLayout(pairs[i].p, inputs, chains); c.flags = pairs[i].flags;
+            c.what = pairs[i].what + (chains ? "/trace" : "/hot"); quick(c); cands.push_back(std::move(c));
+        }
+        for (Cand &c : pairs) cands.push_back(std::move(c));
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

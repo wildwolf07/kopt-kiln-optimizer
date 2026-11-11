@@ -1,0 +1,42 @@
+[
+  {
+    "rows": 1,
+    "before": 99,
+    "after": 97
+  },
+  {
+    "rows": 2,
+    "before": 189,
+    "after": 141
+  },
+  {
+    "rows": 3,
+    "before": 279,
+    "after": 230
+  },
+  {
+    "rows": 4,
+    "before": 369,
+    "after": 274
+  },
+  {
+    "rows": 5,
+    "before": 459,
+    "after": 363
+  },
+  {
+    "rows": 6,
+    "before": 549,
+    "after": 407
+  },
+  {
+    "rows": 7,
+    "before": 639,
+    "after": 496
+  },
+  {
+    "rows": 8,
+    "before": 729,
+    "after": 540
+  }
+]

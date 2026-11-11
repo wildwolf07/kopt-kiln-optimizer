@@ -56,6 +56,8 @@ bool popcountLoops(Func &f);       // bit-counting loops -> SWAR population coun
 bool bitAffineFunction(const Program &in, const Machine &m, Program &out);
 bool rematerializeLoads(Func &f);
 bool packIndexedCounts(Func &f);
+bool factorSelects(Func &f);
+std::vector<Program> rowPairAlternatives(const Program &in);
 bool promoteRollingLoad(Func &f);
 bool finiteInputMasksUpTo(const Program &in, std::vector<uint32_t> &masks, unsigned maxBits);
 std::vector<Program> finiteWideAlternatives(const Program &in);
