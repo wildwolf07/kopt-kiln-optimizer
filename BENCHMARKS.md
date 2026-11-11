@@ -1,3 +1,39 @@
+# optimizer-sieve validation
+
+Based on main `64ce095`. Adds cross-iteration load pipelining (the next
+iteration's first load is read before the rest of the iteration, including
+inner loops whose stores provably miss it) as a side candidate trajectory, and
+monotone loop unswitching as three extra loop plans.
+
+| Machine | Main sample | Sieve sample | Main held-out | Sieve held-out | Main held-out geo | Sieve held-out geo |
+|---|---:|---:|---:|---:|---:|---:|
+| default | 8,973 | 8,712 | 52,610 | 50,290 | 7.453 | 7.646 |
+| few_registers | 13,978 | 13,894 | 84,004 | 83,198 | 11.236 | 11.313 |
+| no_fused | 10,847 | 10,427 | 63,098 | 60,447 | 6.798 | 7.002 |
+| slow_memory | 13,351 | 12,529 | 80,350 | 76,088 | 6.505 | 6.667 |
+| wide_fast | 6,860 | 6,814 | 39,442 | 38,965 | 5.295 | 5.339 |
+
+Held-out (offset 40, eight inputs per pair): 58 pairs faster, 440 equal, two
+slower (array_min and array_max on slow_memory, 1,064 to 1,086 each: their
+training cycles improve, held-out does not). Six sample inputs are slower, the
+largest dfa_dispatch on default (214 to 278). Largest gains: sieve on
+slow_memory 3,923 to 2,669, paren_depth on slow_memory, adler32, fnv_hash,
+array_min/max on no_fused, word_count, prefix_sum, merge_sorted.
+
+Checks on the final binary: 500/500 bench pairs (sample plus 30 generated
+inputs, repeat determinism); 3,000 strict fuzz programs (seed 31301); 500
+metamorphic programs; 46 regressions; 50 smoke pairs plus four negative
+controls; mutation invariance; 1,200 unseen-machine cases with no output
+slower than its input and no fallback; all test suites, including
+`tests/pipeline_across.py` (300 generated loop nests, 746,370 official
+comparisons of every dumped candidate) and `tests/monotone_unswitch.py` (300
+programs, 529,320 comparisons). Deliberately broken builds of either pass fail
+these tests. Worst compiler CPU time 1.13 s (main 0.96 s); 100k-instruction
+programs give the same output in the same time. Linux g++ strict build has no
+warnings and produces byte-identical output on all 500 pairs.
+
+---
+
 # optimizer-stream validation
 
 Based on main `a3e67fe`, in its own branch and worktree. Adds exact rolling

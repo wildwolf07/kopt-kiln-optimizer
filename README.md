@@ -35,16 +35,17 @@ The vector stage adds exact bit-affine synthesis and final layout polishing.
 This `optimizer-stream` branch starts from integrated main `a3e67fe`, preserving
 its later speculation and store rewrites. It adds the previously validated wide
 finite-domain and constant-load splitting candidates, followed by exact rolling
-load reuse with bounded unrolling and scheduling alternatives. Other active
-worktrees are not modified.
+load reuse with bounded unrolling and scheduling alternatives. The
+`optimizer-sieve` branch adds cross-iteration load pipelining over inner loops
+(as a separate candidate trajectory) and monotone loop unswitching.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 8,973 | 11.55x |
-| few_registers | 202,164 | 25,592 | 13,978 | 14.46x |
-| no_fused | 107,966 | 20,218 | 10,847 | 9.95x |
-| slow_memory | 111,254 | 24,319 | 13,351 | 8.33x |
-| wide_fast | 55,744 | 12,923 | 6,860 | 8.13x |
+| default | 103,671 | 16,527 | 8,712 | 11.90x |
+| few_registers | 202,164 | 25,592 | 13,894 | 14.55x |
+| no_fused | 107,966 | 20,218 | 10,427 | 10.35x |
+| slow_memory | 111,254 | 24,319 | 12,529 | 8.88x |
+| wide_fast | 55,744 | 12,923 | 6,814 | 8.18x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
 additional inputs, and optimized twice for determinism. Individual programs can
