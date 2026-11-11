@@ -1,3 +1,52 @@
+# optimizer-packed validation
+
+The packed-counter pass from `2541b59` is applied on main `9316fa7`, which
+already includes cross-iteration load pipelining and monotone loop unswitching.
+Both binaries were built independently. The candidate passed 500 strict
+program and machine checks with 100 generated inputs per pair and repeat
+determinism. Held-out scoring starts at offset 40.
+
+| Machine | Main sample | Packed sample | Main held-out | Packed held-out | Packed held-out geo |
+|---|---:|---:|---:|---:|---:|
+| default | 8,712 | 8,712 | 50,290 | 50,290 | 7.646 |
+| few_registers | 13,894 | 13,894 | 83,198 | 83,198 | 11.313 |
+| no_fused | 10,427 | 10,427 | 60,447 | 60,447 | 7.002 |
+| slow_memory | 12,529 | 12,376 | 76,088 | 75,567 | 6.681 |
+| wide_fast | 6,814 | 6,814 | 38,965 | 38,965 | 5.339 |
+
+Histogram on slow_memory was the sole cycle change against this baseline.
+It ran in 434 instead of 587 sample cycles and 2,136 instead of 2,657 held-out
+cycles. The packed pass accumulates deltas for 2, 4, or 8 bins in at most two
+registers. It proves a bounded trip count, disjoint valid memory ranges and
+absence of observable effects inside the loop before deferring the writes.
+
+Eight generated kernels varied bin counts, addresses, trip bounds, starting
+bin values and exit behavior. Across all five machines, 25 of 40 pairs
+improved and 15 tied. All 1,359 emitted packed candidates passed 54,360
+independent interpreter comparisons. The direct pass test separately passed
+3,520 comparisons across 22 proof fixtures.
+
+The standalone pass's sweep over all 64 histogram lengths found 58 faster
+lengths and six slower short lengths. The empty case rose from 8 to 60
+cycles due to fixed writeback. The compiler selects candidates on aggregate
+simulated cycles.
+
+Maximum compiler CPU time in the combined public run was 0.932 seconds on
+the Mac. On one pinned Linux VM CPU, selected normal cases finished in
+under two seconds and the two 100k-instruction stress inputs completed in
+2.07 and 6.73 seconds. The large outputs were byte-identical to the earlier
+baseline, matching main's large-input equivalence check.
+
+The combined build passed 3,000 strict fuzz programs, 500 metamorphic
+programs, 46 saved regressions, 100 mutation cases with equal cycle totals,
+and all 20 root test suites. The 1,200 unseen-machine cases reported zero
+outputs slower than the input and zero wrapper fallbacks. The packed pass
+also passed 3,520 local interpreter comparisons under ASan and UBSan.
+CI runs these proof and writeback checks without requiring the official kit.
+Full measurements and source hashes are in `results/packed-validation.json`.
+
+---
+
 # optimizer-sieve validation
 
 Based on main `64ce095`. Adds cross-iteration load pipelining (the next

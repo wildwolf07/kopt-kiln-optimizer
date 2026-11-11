@@ -46,3 +46,7 @@ jobs:
         run: python3 tests/rolling_load.py --kit-free
       - name: Check dense-live-set limits with an independent arithmetic oracle
         run: python3 tests/pressure.py
+      - name: Check packed count proof gates and exit writeback
+        env:
+          CXX: g++-11
+        run: python3 tests/packed_counts.py --kit-free
