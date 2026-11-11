@@ -142,3 +142,26 @@ A pure guard-chain fusion experiment was deferred: 500 paired public cases had
 no regressions but saved only two sample cycles in total. Twenty raw-seed
 reoptimization trials established no further gain; wide-fast merging worsened.
 This experiment is absent from production.
+
+Packed indexed increments use a bounded form of
+[arithmetic on register fields](https://aggregate.org/SWAR/over.html). Each
+counter starts at zero and records the number of updates for one bin. The
+original bin can contain any 32-bit value. Adding the extracted count on the
+loop exit gives the same wrapped value as performing each increment in memory.
+This relies on an exact trip bound, disjoint input and bin ranges and an
+ordinary loop with no trapping operations. The pass is derived from the source
+loop structure. A trial with four separate packed accumulators reduced
+loop-carried dependencies but made the final reduction more expensive on the
+tested eight-bin loop. The retained implementation uses at most two words.
+
+A guarded quotient-one remainder shortcut was evaluated separately. It used
+subtraction for nonnegative operands below twice the divisor and retained
+remainder for other values. The branch overhead gave inconsistent GCD
+results and raised the held-out LCM cost across all five machines, so the
+experiment was deferred.
+
+An experimental two-row matrix-vector loop shared the vector load across
+two dot products. With the inner loop retained, the slow-memory held-out
+total fell from 3,132 to 2,356 cycles. Register pressure and control overhead
+made the same loop slower on the other four machines in that experiment.
+The measured packed-counter branch ships independently of this experiment.

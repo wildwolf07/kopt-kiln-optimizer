@@ -1174,6 +1174,74 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             }
         }
     }
+    if (effort == 2 && progSize <= 160 && passEnabled("packedcounts")) {
+        unsigned loads = 0;
+        bool hasStore = false;
+        for (const Block &block : base.blocks) for (const Instr &x : block.ins) {
+            if (x.op == OP_LOAD) ++loads;
+            if (x.op == OP_STORE) hasStore = true;
+        }
+        Func f; std::string err;
+        if (hasStore && loads >= 2 && buildSSA(base, f, err)) {
+            instSimplify(f); gvn(f); dce(f); simplifyCFG(f);
+            if (packIndexedCounts(f)) {
+                BackendOptions raw; raw.schedule = false;
+                const Program seed = lowerToProgram(f, m, raw);
+                std::vector<Cand> packed;
+                size_t work = 0;
+                for (int plan : {1, 2, 4, -4, -8}) {
+                    const int factor = std::abs(plan);
+                    Program p = seed;
+                    if (factor != 1) {
+                        std::vector<uint32_t> names;
+                        Func rf = toRegisterForm(seed, names);
+                        if (plan < 0) {
+                            if (!unrollCountedLoops(rf, names, factor, 240)) continue;
+                        } else {
+                            rotateLoops(rf, 8);
+                            if (!unrollLoops(rf, factor, 240)) continue;
+                        }
+                        p = fromRegisterForm(rf, names);
+                    }
+                    const size_t size = p.instrCount();
+                    if (size > 240 || work + 2 * size > 1600) continue;
+                    work += 2 * size;
+                    for (bool advance : {false, true}) {
+                        Flags fl;
+                        fl.speculate = advance; fl.specLoadsOnly = advance;
+                        const std::string tag = "packedcounts" + std::to_string(plan) +
+                                                (advance ? "/prefetch" : "");
+                        compileVariants(p, m, opt.maxLevel, fl, tag, false, packed);
+                    }
+                }
+                for (Cand &c : packed) quick(c);
+                const auto seeds = bestDistinct(packed, 2);
+                std::vector<Cand> scheduled;
+                for (const Cand *best : seeds) {
+                    if (best->p.instrCount() > 160) continue;
+                    Func ir;
+                    if (!buildSSA(best->p, ir, err)) continue;
+                    instSimplify(ir); dce(ir); simplifyCFG(ir);
+                    BackendOptions bo;
+                    bo.preSchedule = true;
+                    bo.bottomUpSchedule = true;
+                    Cand c;
+                    c.p = lowerToProgram(ir, m, bo);
+                    c.what = best->what + "/bottomup";
+                    c.flags = best->flags;
+                    quick(c);
+                    Cand layout = c;
+                    layout.p = traceLayout(c.p, inputs, false);
+                    layout.what += "/hot";
+                    quick(layout);
+                    scheduled.push_back(std::move(c));
+                    scheduled.push_back(std::move(layout));
+                }
+                for (Cand &c : packed) cands.push_back(std::move(c));
+                for (Cand &c : scheduled) cands.push_back(std::move(c));
+            }
+        }
+    }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";

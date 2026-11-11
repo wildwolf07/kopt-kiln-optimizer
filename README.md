@@ -37,14 +37,16 @@ its later speculation and store rewrites. It adds the previously validated wide
 finite-domain and constant-load splitting candidates, followed by exact rolling
 load reuse with bounded unrolling and scheduling alternatives. The
 `optimizer-sieve` branch adds cross-iteration load pipelining over inner loops
-(as a separate candidate trajectory) and monotone loop unswitching.
+(as a separate candidate trajectory) and monotone loop unswitching. The
+`optimizer-packed` branch builds on that revision with packed counters for
+bounded indexed increments.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
 | default | 103,671 | 16,527 | 8,712 | 11.90x |
 | few_registers | 202,164 | 25,592 | 13,894 | 14.55x |
 | no_fused | 107,966 | 20,218 | 10,427 | 10.35x |
-| slow_memory | 111,254 | 24,319 | 12,529 | 8.88x |
+| slow_memory | 111,254 | 24,319 | 12,376 | 8.99x |
 | wide_fast | 55,744 | 12,923 | 6,814 | 8.18x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
@@ -61,6 +63,7 @@ python3 tests/pressure.py
 python3 tests/wide_finite.py --kit-free
 python3 tests/load_rematerialize.py --kit-free
 python3 tests/rolling_load.py --kit-free
+python3 tests/packed_counts.py --kit-free
 ```
 
 The smoke suite covers arithmetic, loops, guarded division, memory, scratch,
@@ -80,6 +83,7 @@ CXX=clang++ python3 tests/arithmetic_compact.py
 CXX=clang++ python3 tests/signed_pow2.py
 CXX=clang++ python3 tests/counted_loops.py --integrated-bin build/kopt-bin
 python3 tests/unswitch_pipeline.py
+python3 tests/packed_counts.py
 python3 tests/monotone_unswitch.py --count 300
 python3 tests/pipeline_across.py --count 300
 ```
