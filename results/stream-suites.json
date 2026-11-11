@@ -84,7 +84,7 @@
         "python3",
         "tests/counted_loops.py",
         "--integrated-bin",
-        "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-stream/build/kopt-bin"
+        "kopt-stream/build/kopt-bin"
       ],
       "exit_code": 0,
       "seconds": 114.49577124998905,
@@ -170,9 +170,9 @@
         "python3",
         "tests/late_polish.py",
         "--before",
-        "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-stream-reference/build/kopt-bin",
+        "kopt-stream-reference/build/kopt-bin",
         "--after",
-        "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-stream/build/kopt-bin",
+        "kopt-stream/build/kopt-bin",
         "--output",
         "/tmp/kopt-stream-paired500.json",
         "--jobs",

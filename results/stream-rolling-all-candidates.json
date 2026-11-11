@@ -1,5 +1,5 @@
 {
-  "binary_origin": "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-stream/build/kopt-bin",
+  "binary_origin": "kopt-stream/build/kopt-bin",
   "binary_sha256": "3bd2853665d4bc3a9c451288f11fa6129457d4112e850ea7023604a4b5b6a8b2",
   "source_sha256": {
     "rolling_load.cpp": "d2e7a7d48e31a2753949e4a01081a6f3e288bc6cb2f79ba35ab22c26d24c723f",

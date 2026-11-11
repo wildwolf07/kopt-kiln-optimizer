@@ -9,7 +9,7 @@
   ],
   "comparisons": 7680,
   "oracle": "official kirlib (independent)",
-  "source_root": "/Users/santosh/Work/low-level-hackathon-iiitb/kopt-stream/src",
+  "source_root": "kopt-stream/src",
   "sha256": {
     "arithmetic.cpp": "2c44a2da7a0565afa6d69a75f95e573c4d945b3097b219b5f4d74378ec77a2b9",
     "backend.cpp": "489853b2c84c05bd87efcc623b597ddc2033d127fe31c64165cee97a78dd1537",
