@@ -229,4 +229,45 @@ bool selectIdentities(Func &f) {
     return changed;
 }
 
+
+// Canonical sign and boolean forms, so value numbering can merge them:
+// lt(x, 0) == shr(x, 31) for every x (both are the sign bit as 0/1), and
+// eq(c, 0) == 1 - c when c is structurally 0 or 1 (a comparison, shr by 31,
+// or an and with 1).
+bool canonicalSigns(Func &f) {
+    f.resolveAll();
+    std::vector<Inst> defs(f.nvals);
+    std::vector<char> has(f.nvals, 0);
+    for (const BB &b : f.bb) {
+        if (!b.alive) continue;
+        for (const Inst &x : b.insts) if (x.dst >= 0) { defs[x.dst] = x; has[x.dst] = 1; }
+    }
+    const int known = f.nvals;
+    auto bit = [&](Opnd o) {
+        if (o.isConst) return o.c <= 1;
+        if (o.v >= known || !has[o.v]) return false;
+        const Inst &d = defs[o.v];
+        if (d.op == OP_LT || d.op == OP_EQ) return true;
+        if (d.op == OP_SHR && d.a[1].isC(31)) return true;
+        if (d.op == OP_AND && (d.a[0].isC(1) || d.a[1].isC(1))) return true;
+        return false;
+    };
+    bool changed = false;
+    for (BB &b : f.bb) {
+        if (!b.alive) continue;
+        for (Inst &x : b.insts) {
+            if (x.dst < 0 || x.n != 2) continue;
+            if (x.op == OP_LT && x.a[1].isC(0) && !x.a[0].isConst) {
+                x.op = OP_SHR; x.a[1] = Opnd::cst(31); changed = true;
+            } else if (x.op == OP_EQ && (x.a[1].isC(0) || x.a[0].isC(0))) {
+                const Opnd c = x.a[1].isC(0) ? x.a[0] : x.a[1];
+                if (c.isConst || !bit(c)) continue;
+                x.op = OP_SUB; x.a[0] = Opnd::cst(1); x.a[1] = c; changed = true;
+            }
+        }
+    }
+    if (changed) clearIVRanges();
+    return changed;
+}
+
 }  // namespace kopt

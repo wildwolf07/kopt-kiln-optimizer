@@ -64,6 +64,7 @@ bool hoistToIdom(Func &f, int budget);
 bool sinkDeadStores(Func &f);
 bool booleanTrees(Func &f);
 bool selectIdentities(Func &f);
+bool canonicalSigns(Func &f);
 size_t registerNames(const Program &p);
 Program lruPolish(const Program &input, const std::function<uint64_t(const Program &)> &cost,
                   size_t evaluations);

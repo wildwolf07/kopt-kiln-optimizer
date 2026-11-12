@@ -1349,10 +1349,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             for (int r = 0; r < 3; ++r) {
                 bool c = booleanTrees(f);
                 c |= selectIdentities(f);
+                c |= canonicalSigns(f);
                 if (!c) break;
                 any = true; instSimplify(f); dce(f);
             }
             if (!any) continue;
+            gvn(f); dce(f);
             runPipeline(f, m, opt.maxLevel, seed->flags);
             const bool scratch = canSpillToScratch(f);
             for (int mode = 0; mode < 4; ++mode) {

@@ -30,7 +30,20 @@ def program(rng):
     for _ in range(rng.randrange(4, 14)):
         n += 1
         d = "v%d" % n
-        op = rng.choice(["and", "or", "xor", "xor", "add", "sub", "not", "and", "or", "sel", "sel", "mul", "shl"])
+        op = rng.choice(["and", "or", "xor", "xor", "add", "sub", "not", "and", "or", "sel", "sel", "mul", "shl", "cmp", "cmp"])
+        if op == "cmp":
+            x = rng.choice(vals)
+            k = rng.random()
+            if k < 0.3:
+                lines.append("  lt %s, %s, 0" % (d, x))
+            elif k < 0.6:
+                lines.append("  eq %s, %s, 0" % (d, x))
+            elif k < 0.8:
+                lines.append("  lt %s, %s, %s" % (d, x, rng.choice(vals)))
+            else:
+                lines.append("  and %s, %s, 1" % (d, x))
+            vals.append(d)
+            continue
         if op == "sel":
             # select between x and op(x, y): identity-arm factoring candidates.
             x = rng.choice(vals)
