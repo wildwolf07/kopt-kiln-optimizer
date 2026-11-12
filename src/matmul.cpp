@@ -396,6 +396,77 @@ Program emitPipelined(const Program &in, Nest &n, const Machine &m) {
     inst(OP_RET, 0, {result});
     return p;
 }
+
+// Column-chunked single-row variant for few registers: C columns at a time,
+// the A address computed into the A register itself, and on machines without
+// mac the B register reused for the product. Needs C + 3 registers (+1 when C
+// has its own row offset).
+Program emitChunked(const Program &in, Nest &n, const Machine &m, uint32_t C) {
+    Program p; p.name = in.name; p.params = in.params;
+    uint32_t cursor = 0;
+    auto fresh = [&]() {
+        while (std::find(p.params.begin(), p.params.end(), cursor) != p.params.end()) ++cursor;
+        return cursor++;
+    };
+    auto reg = [](uint32_t r) { return Operand::reg(r); };
+    auto imm = [](uint32_t c) { return Operand::imm(c); };
+    auto block = [&](const char *label) { Block b; b.label = label; p.blocks.push_back(b); };
+    auto inst = [&](Op op, uint32_t dst, std::initializer_list<Operand> args) {
+        Instr x; x.op = op; x.dst = dst; x.nsrc = static_cast<int>(args.size());
+        std::copy(args.begin(), args.end(), x.src); p.blocks.back().ins.push_back(x);
+    };
+    const uint32_t N = n.trip[0], M = n.trip[1], P = n.trip[2];
+    const uint32_t rA = fresh();
+    const bool shareC = n.c.ci == n.a.ci;
+    const uint32_t rC = shareC ? rA : fresh();
+    const uint32_t a = fresh(), b = fresh();
+    std::vector<uint32_t> acc(C);
+    for (auto &r : acc) r = fresh();
+    block("mm_entry");
+    inst(OP_CONST, rA, {imm(0)});
+    if (!shareC) inst(OP_CONST, rC, {imm(0)});
+    Instr j; j.op = OP_JMP; j.target[0] = 1; p.blocks.back().ins.push_back(j);
+    block("mm_row");
+    for (uint32_t c0 = 0; c0 < M; c0 += C) {
+        const uint32_t width = std::min(C, M - c0);
+        for (uint32_t k = 0; k < P; ++k) {
+            inst(OP_ADD, a, {reg(rA), imm(static_cast<uint32_t>(n.a.base + n.a.ck * k))});
+            inst(OP_LOAD, a, {reg(a)});
+            for (uint32_t w = 0; w < width; ++w) {
+                const uint32_t col = c0 + w, s = acc[w];
+                inst(OP_LOAD, b, {imm(static_cast<uint32_t>(n.b.base + n.b.ck * k + n.b.cj * col))});
+                if (k == 0) inst(OP_MUL, s, {reg(a), reg(b)});
+                else if (m.fused_mac) inst(OP_MAC, s, {reg(a), reg(b), reg(s)});
+                else { inst(OP_MUL, b, {reg(a), reg(b)}); inst(OP_ADD, s, {reg(s), reg(b)}); }
+            }
+        }
+        for (uint32_t w = 0; w < width; ++w) {
+            inst(OP_ADD, a, {reg(rC), imm(static_cast<uint32_t>(n.c.base + n.c.cj * (c0 + w)))});
+            inst(OP_STORE, 0, {reg(a), reg(acc[w])});
+        }
+    }
+    inst(OP_ADD, rA, {reg(rA), imm(static_cast<uint32_t>(n.a.ci))});
+    if (!shareC) inst(OP_ADD, rC, {reg(rC), imm(static_cast<uint32_t>(n.c.ci))});
+    inst(OP_LT, a, {reg(rA), imm(static_cast<uint32_t>(n.a.ci * N))});
+    Instr br; br.op = OP_BR; br.nsrc = 1; br.src[0] = reg(a); br.target[0] = 1; br.target[1] = 2;
+    p.blocks.back().ins.push_back(br);
+    block("mm_done");
+    std::vector<Operand> values(n.f.nvals);
+    std::vector<char> have(n.f.nvals, 0);
+    for (size_t i = 0; i < n.f.params.size(); ++i) { values[n.f.params[i]] = reg(in.params[i]); have[n.f.params[i]] = 1; }
+    std::function<Operand(Opnd)> clone = [&](Opnd o) -> Operand {
+        if (o.isConst) return imm(o.c);
+        if (have[o.v]) return values[o.v];
+        const Inst &x = *n.def(o);
+        Instr copy; copy.op = x.op; copy.nsrc = x.n; copy.k = x.k;
+        for (int i = 0; i < x.n; ++i) copy.src[i] = clone(x.a[i]);
+        copy.dst = fresh(); p.blocks.back().ins.push_back(copy);
+        have[o.v] = 1; return values[o.v] = reg(copy.dst);
+    };
+    const Operand result = clone(n.result);
+    inst(OP_RET, 0, {result});
+    return p;
+}
 }  // namespace
 
 std::vector<Program> matmulAlternatives(const Program &in, const Machine &m) {
@@ -406,6 +477,7 @@ std::vector<Program> matmulAlternatives(const Program &in, const Machine &m) {
     if (n.trip[0] % 2 == 0) out.push_back(emit(in, n, m, 2, false));
     out.push_back(emit(in, n, m, 1, true));
     out.push_back(emitPipelined(in, n, m));
+    for (uint32_t C : {1u, 2u, 4u}) if (C <= n.trip[1]) out.push_back(emitChunked(in, n, m, C));
     return out;
 }
 
