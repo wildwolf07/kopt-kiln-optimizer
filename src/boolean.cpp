@@ -28,7 +28,10 @@ struct Formula {
 
 const std::array<Formula, 256> &formulas() {
     static const std::array<Formula, 256> table = [] {
-        std::array<Formula, 256> t{};
+        // Explicit initialization of every entry (no reliance on aggregate
+        // value-initialization of a class with member initializers).
+        std::array<Formula, 256> t;
+        for (Formula &e : t) e = Formula{kInf, kInf, -1, 0, 0};
         for (uint8_t v : kVar) t[v] = Formula{0, 0, -1, 0, 0};
         t[0x00] = Formula{0, 0, -1, 0, 0};
         t[0xFF] = Formula{0, 0, -1, 0, 0};

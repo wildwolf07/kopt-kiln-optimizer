@@ -66,6 +66,29 @@ Program lruPolish(const Program &input, const std::function<uint64_t(const Progr
                 std::swap(q.blocks[b].ins[i].src[0], q.blocks[b].ins[i].src[1]);
                 if (attempt(q)) improved = true;
             }
+        // Swap two adjacent independent instructions (at most one of them
+        // has an effect or may trap, and neither reads or writes the other's
+        // destination), which reorders their register touches.
+        auto effect = [](Op op) {
+            return op == OP_LOAD || op == OP_STORE || op == OP_VLOAD || op == OP_VSTORE ||
+                   op == OP_DIV || op == OP_MOD || isTerminator(op);
+        };
+        auto touches = [](const Instr &x, uint32_t r) {
+            if (hasDest(x.op) && x.dst == r) return true;
+            for (int k = 0; k < x.nsrc; ++k) if (x.src[k].isReg && x.src[k].v == r) return true;
+            return false;
+        };
+        for (size_t b = 0; b < best.blocks.size(); ++b)
+            for (size_t i = 0; i + 2 < best.blocks[b].ins.size(); ++i) {
+                const Instr &x = best.blocks[b].ins[i], &y = best.blocks[b].ins[i + 1];
+                if (isTerminator(x.op) || isTerminator(y.op)) continue;
+                if (effect(x.op) && effect(y.op)) continue;
+                if (hasDest(x.op) && touches(y, x.dst)) continue;
+                if (hasDest(y.op) && touches(x, y.dst)) continue;
+                Program q = best;
+                std::swap(q.blocks[b].ins[i], q.blocks[b].ins[i + 1]);
+                if (attempt(q)) improved = true;
+            }
         for (size_t b = 0; b < best.blocks.size(); ++b)
             for (size_t i = 0; i < best.blocks[b].ins.size(); ++i)
                 for (uint32_t r : names) {
