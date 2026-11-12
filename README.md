@@ -50,11 +50,11 @@ few registers).
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 8,670 | 11.96x |
-| few_registers | 202,164 | 25,592 | 13,751 | 14.70x |
+| default | 103,671 | 16,527 | 8,529 | 12.16x |
+| few_registers | 202,164 | 25,592 | 13,589 | 14.88x |
 | no_fused | 107,966 | 20,218 | 10,386 | 10.40x |
-| slow_memory | 111,254 | 24,319 | 12,279 | 9.06x |
-| wide_fast | 55,744 | 12,923 | 6,763 | 8.24x |
+| slow_memory | 111,254 | 24,319 | 11,993 | 9.28x |
+| wide_fast | 55,744 | 12,923 | 6,625 | 8.41x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
 additional inputs, and optimized twice for determinism. Individual programs can

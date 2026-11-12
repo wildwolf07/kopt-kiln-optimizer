@@ -1,3 +1,31 @@
+# optimizer-boost2 validation
+
+This candidate starts from main `58c5a3a` and adds structurally proven
+matrix-product recipes (see DESIGN.md). They are extra candidates; earlier
+search paths and seeds are unchanged.
+
+| Machine | Main sample | Boost2 sample | Main held-out | Boost2 held-out | Main held-out geo | Boost2 held-out geo |
+|---|---:|---:|---:|---:|---:|---:|
+| default | 8,670 | 8,529 | 50,113 | 48,985 | 7.742 | 7.787 |
+| few_registers | 13,731 | 13,589 | 82,293 | 81,157 | 11.528 | 11.559 |
+| no_fused | 10,386 | 10,386 | 60,211 | 60,211 | 7.083 | 7.083 |
+| slow_memory | 12,210 | 11,993 | 73,697 | 71,961 | 6.805 | 6.837 |
+| wide_fast | 6,763 | 6,625 | 38,712 | 37,608 | 5.414 | 5.472 |
+
+Paired on the same 500 public pairs (random 30, score offset 40): 4 pairs
+improve in held-out cycles, 0 get worse and 496 tie.
+
+| Kernel and machine | Sample main → boost2 | Held-out main → boost2 |
+|---|---:|---:|
+| matmul4, slow_memory | 580 → 363 | 4,640 → 2,904 |
+| matmul4, few_registers | 595 → 453 | 4,760 → 3,624 |
+| matmul4, default | 316 → 175 | 2,528 → 1,400 |
+| matmul4, wide_fast | 211 → 73 | 1,688 → 584 |
+
+On no_fused (32-instruction cache) the earlier rolled candidates still win.
+The Linux g++ 15 build produces byte-identical outputs on all 500 pairs and
+the same cycle totals.
+
 # optimizer-boost validation
 
 This candidate starts from main `1689c93` and adds final-only candidate
