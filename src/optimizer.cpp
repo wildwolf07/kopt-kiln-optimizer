@@ -584,7 +584,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     };
 
     // The variant search multiplies compile time, so its size depends on the
-    // program size (never on the clock): the full search up to 1000
+    // program size (never on the clock): the full search up to 600
     // instructions, a reduced one up to 4000, a single compile above that.
     const bool dense = base.blocks.size() > 256 || distinctRegisters(base) > 256;
     uint64_t trainingWork = 0;
