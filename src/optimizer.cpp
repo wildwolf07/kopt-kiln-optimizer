@@ -1490,8 +1490,12 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             if (registerNames(seed->p) <= static_cast<size_t>(m.registers)) continue;
             const size_t size = seed->p.instrCount();
             if (size > 400) continue;
-            // Budget in candidate evaluations, scaled down for larger programs.
-            const size_t evals = std::min<size_t>(1500, 60000 / (size + 20));
+            // Budget in candidate evaluations, scaled down for larger programs
+            // and for long training runs (each evaluation simulates them all).
+            uint64_t trainSteps = 1;
+            for (size_t i = 0; i < timingSample && i < origRuns.size(); i++) trainSteps += origRuns[i].steps;
+            const size_t evals = static_cast<size_t>(std::min<uint64_t>(
+                std::min<size_t>(1500, 60000 / (size + 20)), 40000000ull / trainSteps));
             if (steps + evals > 3000) continue;
             steps += evals;
             auto eval = [&](const Program &q) {
