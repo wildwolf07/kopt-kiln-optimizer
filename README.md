@@ -46,7 +46,8 @@ and canonical sign forms; partially dead store sinking; join hoisting above
 effectful branches; and register-touch polishing for machines that spill by
 themselves. The `optimizer-boost2` branch adds structurally proven
 matrix-product recipes (k-major rows, shared operand loads, column chunks for
-few registers).
+few registers). The `optimizer-boost4` branch extends those recipes to 16
+columns and to long-running products searched at reduced effort.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|

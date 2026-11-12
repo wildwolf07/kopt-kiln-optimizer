@@ -1,3 +1,25 @@
+# optimizer-boost4 validation
+
+This candidate starts from main `495f87b`. Matrix-product recipes now accept
+up to 16 columns and also run at reduced search effort, which long-running
+products receive because of their training cost. Public bench results are
+unchanged on all 500 pairs (the public matmul4 already used the recipe).
+
+Generated products C[i][j] = sum_k A[i][k] * B[k][j] (zero inputs; the timing
+does not depend on data), cycles before → after:
+
+| N M P | default | few_registers | no_fused | slow_memory | wide_fast |
+|---|---:|---:|---:|---:|---:|
+| 4 4 4 | 175 → 175 | 453 → 453 | 426 → 426 | 363 → 363 | 73 → 73 |
+| 8 8 8 | 2,313 → 2,313 | 4,044 → 4,044 | 4,889 → 4,889 | 3,742 → 3,742 | 1,647 → 1,647 |
+| 6 12 6 | 2,927 → 2,401 | 8,542 → 5,685 | 3,220 → 3,220 | 4,837 → 3,515 | 1,461 → 1,461 |
+| 3 5 7 | 514 → 514 | 1,206 → 1,206 | 841 → 841 | 823 → 823 | 278 → 278 |
+| 16 16 16 | 47,848 → 20,433 | 79,306 → 41,121 | 53,305 → 40,945 | 70,738 → 41,545 | 23,407 → 19,855 |
+| 8 16 4 | 2,650 → 2,650 | 4,071 → 4,071 | 4,203 → 4,203 | 5,934 → 4,552 | 1,826 → 1,826 |
+| 2 16 16 | 3,381 → 2,555 | 6,884 → 5,141 | 5,309 → 5,119 | 5,429 → 5,127 | 2,029 → 2,029 |
+
+No size got slower. Compile CPU for the 16x16x16 case stayed at 0.14-0.30 s.
+
 # optimizer-boost2 validation
 
 This candidate starts from main `58c5a3a` and adds structurally proven
