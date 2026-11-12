@@ -25,11 +25,11 @@ import kirlib as K  # noqa: E402
 
 def program(rng):
     N = rng.choice([1, 2, 3, 4, 4, 5, 6, 8])
-    M = rng.choice([1, 2, 3, 4, 4, 5, 8])
-    P = rng.choice([1, 2, 3, 4, 4, 6, 8])
-    lda = rng.choice([P, P, P + 1, 8])
-    ldb = rng.choice([M, M, M + 2, 8])
-    ldc = rng.choice([M, M, M + 1, 8])
+    M = rng.choice([1, 2, 3, 4, 4, 5, 8, 12, 16])
+    P = rng.choice([1, 2, 3, 4, 4, 6, 8, 12, 16])
+    lda = rng.choice([P, P, P + 1, max(P, 8)])
+    ldb = rng.choice([M, M, M + 2, max(M, 8)])
+    ldc = rng.choice([M, M, M + 1, max(M, 8)])
     abase = rng.choice([0, 0, 10, 100])
     bbase = abase + N * lda + rng.choice([0, 0, 3, 50])
     cbase = bbase + P * ldb + rng.choice([0, 0, 7, 200])

@@ -1336,7 +1336,9 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         for (Cand &c : pairs) cands.push_back(std::move(c));
     }
     // Matrix-product recipes (k-major rows, shared B loads), own budget.
-    if (effort == 2 && progSize <= 400 && passEnabled("matmul")) {
+    // Also at reduced effort (long training runs): recognition is cheap and
+    // larger products are where the recipe matters most.
+    if (effort >= 1 && progSize <= 400 && passEnabled("matmul")) {
         const auto recipes = matmulAlternatives(base, m);
         std::vector<Cand> mm;
         for (size_t r = 0; r < recipes.size(); ++r) {
@@ -1348,6 +1350,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             const bool scratch = canSpillToScratch(f);
             for (int mode = 0; mode < 4; ++mode) {
                 if (mode == 3 && !scratch) continue;
+                if (effort < 2 && mode != 2) continue;
                 Func copy = f;
                 BackendOptions bo;
                 bo.preSchedule = mode != 0;

@@ -172,7 +172,7 @@ bool recognize(const Program &in, Nest &n) {
         if (!test || test->op != OP_LT || test->a[0].isConst) return false;
         const Val iv = test->a[0].v;
         uint32_t bound;
-        if (!n.constant(test->a[1], bound) || bound < 1 || bound > (d == 0 ? 64u : d == 1 ? 8u : 16u)) return false;
+        if (!n.constant(test->a[1], bound) || bound < 1 || bound > (d == 0 ? 64u : d == 1 ? 16u : 16u)) return false;
         size_t expected = d == 2 ? 2 : 1;
         if (H.phis.size() != expected) return false;
         bool sawIv = false;
