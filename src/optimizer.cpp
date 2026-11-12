@@ -1335,6 +1335,35 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : pairs) cands.push_back(std::move(c));
     }
+    // Boolean trees: cheaper exact formulas for and/or/xor (and bitwise add/sub)
+    // trees over at most three operands. Final-only, so earlier seed lineages stay.
+    if (effort == 2 && passEnabled("boolean")) {
+        const auto seeds = bestDistinct(cands, 4);
+        std::vector<Cand> rewritten;
+        for (const Cand *seed : seeds) {
+            if (seed->p.instrCount() > 2000) continue;
+            Func f; std::string err;
+            if (!buildSSA(seed->p, f, err)) continue;
+            instSimplify(f); dce(f);
+            bool any = false;
+            for (int r = 0; r < 3 && booleanTrees(f); ++r) { any = true; instSimplify(f); dce(f); }
+            if (!any) continue;
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; ++mode) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo;
+                bo.preSchedule = mode != 0;
+                bo.bottomUpSchedule = mode == 2;
+                bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.flags = seed->flags;
+                c.what = seed->what + "/boolean" + std::to_string(mode);
+                quick(c); rewritten.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : rewritten) cands.push_back(std::move(c));
+    }
     std::vector<Cand> dumpOnly;   // candidates kept out of selection (KOPT_DUMP shows them)
     // Partially dead stores: a store overwritten on one successor path moves
     // to the other edge. Final-only, own budget.
