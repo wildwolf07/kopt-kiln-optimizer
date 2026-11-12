@@ -1335,6 +1335,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : pairs) cands.push_back(std::move(c));
     }
+    std::vector<Cand> dumpOnly;   // candidates kept out of selection (KOPT_DUMP shows them)
     // Partially dead stores: a store overwritten on one successor path moves
     // to the other edge. Final-only, own budget.
     if (effort == 2 && passEnabled("deadstores")) {
@@ -1435,8 +1436,10 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         // Only a clear training win replaces the incumbent: sub-0.5% gains of a
         // final-only stage did not carry over to other inputs.
-        for (Cand &c : hoisted)
+        for (Cand &c : hoisted) {
             if (c.ok && (incumbent == UINT64_MAX || c.cycles * 1000 < incumbent * 995)) cands.push_back(std::move(c));
+            else dumpOnly.push_back(std::move(c));   // developer dumps still show it
+        }
     }
     // Register-touch polishing when the program names more registers than the
     // machine keeps resident: commutative operand order and `mov r, r`
@@ -1466,6 +1469,14 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         for (Cand &c : polished) cands.push_back(std::move(c));
     }
     if (const char *dump = getenv("KOPT_DUMP")) {   // developer: write every candidate
+        for (size_t i = 0; i < dumpOnly.size(); i++) {
+            std::string path = std::string(dump) + "/extra" + std::to_string(i) + ".kir";
+            if (FILE *fp = fopen(path.c_str(), "w")) {
+                fprintf(fp, "; %s score=%llu ok=%d\n%s", dumpOnly[i].what.c_str(),
+                        static_cast<unsigned long long>(dumpOnly[i].cycles), dumpOnly[i].ok ? 1 : 0, printProgram(dumpOnly[i].p).c_str());
+                fclose(fp);
+            }
+        }
         for (size_t i = 0; i < cands.size(); i++) {
             std::string path = std::string(dump) + "/cand" + std::to_string(i) + ".kir";
             if (FILE *fp = fopen(path.c_str(), "w")) {

@@ -4930,6 +4930,8 @@ bool sinkDeadStores(Func &f) {
                 const Inst st = B.insts[i];
                 if (st.op != OP_STORE) continue;
                 const Opnd addr = f.resolve(st.a[0]);
+                // A store that may trap is itself a visible effect: keep it.
+                if (!inMemory(f, ds, addr)) continue;
                 const WordForm w = wordForm(f, ds, addr, b, -1);
                 const Range wr = rangeOf(f, ds, addr, 6);
                 // Can instruction x (seen in block `blk`, entered from `from`)
