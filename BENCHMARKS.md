@@ -1,3 +1,46 @@
+# optimizer-boost validation
+
+This candidate starts from main `1689c93` and adds final-only candidate
+stages: boolean-tree formulas, select identity arms and canonical sign forms;
+partially dead store sinking; join hoisting above effectful branches (0.5%
+selection margin); and register-touch polishing for programs that name more
+registers than the machine keeps. Earlier search paths and seeds are unchanged.
+
+| Machine | Main sample | Boost sample | Main held-out | Boost held-out | Main held-out geo | Boost held-out geo |
+|---|---:|---:|---:|---:|---:|---:|
+| default | 8,700 | 8,670 | 50,229 | 50,113 | 7.652 | 7.742 |
+| few_registers | 13,846 | 13,731 | 82,938 | 82,293 | 11.327 | 11.528 |
+| no_fused | 10,403 | 10,386 | 60,317 | 60,211 | 7.012 | 7.083 |
+| slow_memory | 12,372 | 12,210 | 74,790 | 73,697 | 6.701 | 6.805 |
+| wide_fast | 6,809 | 6,763 | 38,936 | 38,712 | 5.342 | 5.414 |
+
+Paired against main on the same 500 public pairs (random 30, score offset 40):
+52 pairs improve in held-out cycles, 0 get worse and 448 tie.
+Largest held-out improvements:
+
+| Kernel and machine | Sample main → boost | Held-out main → boost |
+|---|---:|---:|
+| matmul4, slow_memory | 630 → 580 | 5,040 → 4,640 |
+| paren_depth, few_registers | 504 → 458 | 3,224 → 2,968 |
+| hamming_dist, slow_memory | 167 → 146 | 1,542 → 1,324 |
+| crc_bitwise, few_registers | 327 → 300 | 1,824 → 1,674 |
+| poly_mac, few_registers | 36 → 23 | 288 → 184 |
+| sensor_threshold, wide_fast | 79 → 68 | 727 → 640 |
+| histogram, slow_memory | 434 → 419 | 2,136 → 2,062 |
+| redundant_loads, slow_memory | 101 → 92 | 1,221 → 1,147 |
+| branchy_select, slow_memory | 264 → 248 | 1,536 → 1,477 |
+| count_above, few_registers | 182 → 174 | 1,190 → 1,142 |
+| run_count, slow_memory | 133 → 128 | 1,222 → 1,175 |
+| array_max, slow_memory | 123 → 108 | 1,086 → 1,040 |
+| sensor_threshold, no_fused | 93 → 90 | 703 → 657 |
+| conv_mac, wide_fast | 120 → 105 | 522 → 484 |
+
+A GCC 15 build exposed a compiler difference in aggregate initialization of
+the formula table (entries left zeroed); the table is now initialized
+explicitly. Gates for this branch therefore also run on a Linux g++ binary:
+bench, fuzzing and regressions, plus byte-identical outputs to the macOS
+clang build on all 500 public pairs.
+
 # optimizer-matrix validation
 
 This candidate starts from main `9316fa7`, includes the validated packed

@@ -126,7 +126,14 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    bottom-up scheduling and a layout alternative to at most two of its own seeds.
    Offer bounded select factoring from the best three ordinary seeds and the
    existing side seeds under 2,000 lowering units. Then offer paired-row
-   matrix/vector recipes with their own 6,000-unit budget. These final stages
+   matrix/vector recipes with their own 6,000-unit budget. Then four more
+   final-only stages, each seeded from the best distinct candidates so far:
+   boolean/select/sign rewrites (four seeds, re-running the cleanup pipeline),
+   partially dead store sinking (four seeds, at most 6,000 input instructions),
+   join hoisting (four seeds, same budget; a result enters selection only when
+   it beats the best training total by more than 0.5%), and register-touch
+   polishing for programs that name more registers than the machine keeps
+   (two seeds, at most 3,000 candidate evaluations). These final stages
    retain all earlier candidates and search paths.
    Measure alternatives with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
@@ -208,6 +215,12 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
 | Header counted groups | Let D=(U-1)s. Guard bound >= INT_MIN+D, then test i < bound-D per group. | Intermediate increments cannot wrap before a skipped test. Each copy writes comparison=1. Keep the final possibly wrapping increment and original scalar exit test. |
 | Unswitching | Clone a loop and dispatch on a register the loop never writes. | Reading the invariant early cannot trap; guarded body operations stay on their selected paths and in order. |
+| Boolean trees | For each and/or/xor/add/sub root, expand operands through and/or/xor (and add/sub that act bitwise, below) to at most three leaves and depth 6, then compute the 8-entry truth table. A table of minimum formula size (then depth) over all 256 three-input functions, built once by a fixpoint over and/or/xor with constants 0 and 0xFFFFFFFF, gives the replacement; it is used only when it has fewer instructions than the root plus the single-use nodes it frees. O(n) per round, at most three rounds. | Each bit of an and/or/xor tree is the same boolean function of the same bit of every leaf (the two constants are uniform), so equal truth tables mean equal 32-bit results. x + y = x | y when no assignment sets both (no carry can occur); x - y = x & ~y when every assignment setting y sets x (no borrow). The tables check these conditions over all assignments. A variable the function does not depend on may be replaced by 0. |
+| Select identity arms | select(c, op(x, a), x) becomes op(x, select(c, a, e)) and the mirrored arm order likewise, for add/sub/xor/or/shl/shr (e = 0), and (e = 0xFFFFFFFF) and mul (e = 1); commutative operations also match op(a, x). O(n). | op(x, e) = x for every x under these identities (Kiln shifts use the low five bits of the count, and 0 shifts by 0), so both select outcomes are unchanged. All operations are total. |
+| Canonical signs | lt(x, 0) becomes shr(x, 31); eq(c, 0) becomes 1 - c when c is a comparison, shr by 31, or and with 1. Followed by GVN and the cleanup pipeline. O(n). | Both forms of lt(x, 0) are the sign bit as 0 or 1. A structurally 0/1 value c gives eq(c, 0) = 1 - c. |
+| Partially dead stores | Fresh SSA with IV ranges and signed VRP. A store whose address is proven in memory moves past the rest of its block to each successor edge on which the same word is not certainly written again first; it is deleted when every successor path writes it again. The search looks through the successor and at most one empty jump block. Up to four rounds. | The moved store passes only instructions that cannot read its word, cannot trap (divisors proven nonzero, other addresses proven in memory) and are not volatile, return or trap. On the overwriting path nothing between the two stores can read the word or stop the program, so the final word and every trap state are unchanged. Possibly trapping stores never move. Word equality is checked frame-correctly: phis of the entered block are replaced by their values on that edge, values recomputed in that block are treated as unknown, and every compared base names the same dynamic instance. |
+| Join hoisting | Two transforms, at most three rounds: (1) a branch arm with only total pure work and a jump to a join (not the other arm, not already a successor) is emptied into the branch block, which then targets the join; the join's phis take the moved values on the new edge. (2) Total pure work of a block whose immediate dominator ends in a branch and lies in the same innermost loop moves into that dominator when its operands are available there (at most 64 per round). | Only operations without traps, memory or volatile effects move, so they may also run on paths that do not use them. The dominator reaches every use, so each moved value is defined where it is read. The redirected edge carries the same values into the join. |
+| Register-touch polishing | Only when the program names more registers than the machine keeps. Deterministic first-improvement search over two edits: swap the read operands of add/mul/and/or/xor/eq and the first two of mac, or insert `mov r, r` before an instruction. Each edit is kept only if the exact cycle model improves on the training inputs; at most eight rounds and a per-seed evaluation budget of min(1,500, 60,000/(size+20), 40,000,000/(training steps)). Edits also swap two adjacent instructions when neither reads or writes the other's destination and at most one may trap or touch memory. | Commutative operand order and `mov r, r` change only which registers the machine touches and evicts, never a value. Candidates are still self-checked. |
 | Monotone unswitching | Innermost reducible loops only, one branch per loop, loop size at most the unroll budget. The branch condition must be a pure non-trapping expression computed in its own block (at most 32 operand visits); its leaf registers may be written only in blocks that the other successor T (single predecessor: the branch block) dominates within one iteration (DFS from the header that avoids T and back edges). | Once the stable side is taken, T does not run for the rest of that iteration, so no leaf changes; by induction every later evaluation in this loop instance sees the same leaves and takes the same side. The stable edge therefore enters a clone of the loop where the branch is a jump. Entry from outside always reaches the original, so each loop instance starts with the full test. All instructions keep their order on every path. |
 | Return copying | A jump to a return block of at most 3 instructions takes a copy of it; a branch to two identical such blocks becomes a jump; mov a,s; ret a becomes ret s; unreachable blocks are dropped. | Text copy of the executed instructions minus one jump. |
 | Unread spill stores | Remove stores to scratch spill words that no load reads (K-name allocation only). | All original addresses were proven below 3072, so only spill code touches scratch. |
@@ -326,6 +339,13 @@ inputs. Neither profiles nor sampled runs establish semantic facts.
   overlapping memory ranges reject.
 - Select factoring can lengthen a dependency chain even while removing an
   operation. Candidate measurements include that cost.
+- Join hoisting adds work to paths that do not need it. Small training wins did
+  not always carry over, so it needs a 0.5% margin, and it is not applied to
+  finite-domain decision graphs.
+- Partially dead store sinking adds an exit-edge block per sunk store. On
+  machines with costly taken branches the original form usually wins.
+- Register-touch polishing is a local search with a fixed budget and two
+  edits; it does not reallocate registers.
 
 - Packed count writeback has a fixed cost. Very short loops can take more
   cycles even when the candidate wins on the training inputs as a whole.

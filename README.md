@@ -40,15 +40,19 @@ load reuse with bounded unrolling and scheduling alternatives. The
 (as a separate candidate trajectory) and monotone loop unswitching. The
 `optimizer-packed` branch builds on that revision with packed counters for
 bounded indexed increments. The `optimizer-matrix` candidate adds select
-factoring and paired-row matrix/vector reuse.
+factoring and paired-row matrix/vector reuse. The `optimizer-boost` branch
+adds final-only candidate stages: boolean-tree formulas, select identity arms
+and canonical sign forms; partially dead store sinking; join hoisting above
+effectful branches; and register-touch polishing for machines that spill by
+themselves.
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 8,700 | 11.92x |
-| few_registers | 202,164 | 25,592 | 13,846 | 14.60x |
-| no_fused | 107,966 | 20,218 | 10,403 | 10.38x |
-| slow_memory | 111,254 | 24,319 | 12,372 | 8.99x |
-| wide_fast | 55,744 | 12,923 | 6,809 | 8.19x |
+| default | 103,671 | 16,527 | 8,670 | 11.96x |
+| few_registers | 202,164 | 25,592 | 13,751 | 14.70x |
+| no_fused | 107,966 | 20,218 | 10,386 | 10.40x |
+| slow_memory | 111,254 | 24,319 | 12,279 | 9.06x |
+| wide_fast | 55,744 | 12,923 | 6,763 | 8.24x |
 
 Every program/machine pair is checked against the kit on its sample plus 100
 additional inputs, and optimized twice for determinism. Individual programs can
@@ -89,6 +93,8 @@ python3 tests/unswitch_pipeline.py
 python3 tests/packed_counts.py
 python3 tests/monotone_unswitch.py --count 300
 python3 tests/pipeline_across.py --count 300
+python3 tests/late_hoist_store.py --count 300
+python3 tests/boolean_trees.py --count 400
 ```
 
 The fuzzer includes conditional pointer cursors, counted recurrences and
