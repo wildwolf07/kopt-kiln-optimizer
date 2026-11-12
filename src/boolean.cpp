@@ -170,4 +170,63 @@ bool booleanTrees(Func &f) {
     return changed;
 }
 
+
+// select(c, op(x, a), x) == op(x, select(c, a, e)) where e is op's right
+// identity (0 for add/sub/xor/or/shl/shr, 0xFFFFFFFF for and, 1 for mul); the
+// mirrored arm order likewise. Commutative ops also match op(a, x). The select
+// then depends only on c and a, which are often ready long before x.
+bool selectIdentities(Func &f) {
+    if (f.nvals > 60000) return false;
+    f.resolveAll();
+    std::vector<Inst> defs(f.nvals);
+    std::vector<char> has(f.nvals, 0);
+    for (const BB &b : f.bb) {
+        if (!b.alive) continue;
+        for (const Inst &x : b.insts) if (x.dst >= 0) { defs[x.dst] = x; has[x.dst] = 1; }
+    }
+    const int known = f.nvals;
+    auto identity = [](Op op, uint32_t &e) {
+        switch (op) {
+        case OP_ADD: case OP_SUB: case OP_XOR: case OP_OR: case OP_SHL: case OP_SHR: e = 0; return true;
+        case OP_AND: e = 0xFFFFFFFFu; return true;
+        case OP_MUL: e = 1; return true;
+        default: return false;
+        }
+    };
+    auto commutes = [](Op op) { return op == OP_ADD || op == OP_XOR || op == OP_OR || op == OP_AND || op == OP_MUL; };
+    bool changed = false;
+    for (BB &b : f.bb) {
+        if (!b.alive) continue;
+        std::vector<Inst> out;
+        out.reserve(b.insts.size());
+        for (const Inst &x : b.insts) {
+            if (x.op != OP_SELECT || x.n != 3 || x.dst < 0) { out.push_back(x); continue; }
+            bool done = false;
+            for (int arm = 1; arm <= 2 && !done; ++arm) {
+                const Opnd opArm = x.a[arm], plain = x.a[3 - arm];
+                if (opArm.isConst || plain.isConst || opArm.v >= known || !has[opArm.v]) continue;
+                const Inst &y = defs[opArm.v];
+                uint32_t e;
+                if (y.n != 2 || !identity(y.op, e)) continue;
+                Opnd other;
+                if (y.a[0] == plain) other = y.a[1];
+                else if (commutes(y.op) && y.a[1] == plain) other = y.a[0];
+                else continue;
+                Inst sel;
+                sel.op = OP_SELECT; sel.n = 3; sel.dst = f.newVal(); sel.a[0] = x.a[0];
+                sel.a[arm] = other; sel.a[3 - arm] = Opnd::cst(e);
+                Inst z;
+                z.op = y.op; z.n = 2; z.dst = x.dst; z.a[0] = plain; z.a[1] = Opnd::val(sel.dst);
+                out.push_back(sel);
+                out.push_back(z);
+                done = changed = true;
+            }
+            if (!done) out.push_back(x);
+        }
+        b.insts.swap(out);
+    }
+    if (changed) { clearIVRanges(); dce(f); }
+    return changed;
+}
+
 }  // namespace kopt

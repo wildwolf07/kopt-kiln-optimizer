@@ -30,7 +30,25 @@ def program(rng):
     for _ in range(rng.randrange(4, 14)):
         n += 1
         d = "v%d" % n
-        op = rng.choice(["and", "or", "xor", "xor", "add", "sub", "not", "and", "or"])
+        op = rng.choice(["and", "or", "xor", "xor", "add", "sub", "not", "and", "or", "sel", "sel", "mul", "shl"])
+        if op == "sel":
+            # select between x and op(x, y): identity-arm factoring candidates.
+            x = rng.choice(vals)
+            y = rng.choice(vals + CONSTS)
+            c = rng.choice(vals)
+            t = d
+            n += 1
+            d = "v%d" % n
+            inner = rng.choice(["add", "sub", "xor", "or", "and", "mul", "shl", "shr"])
+            a1, a2 = (x, y) if rng.random() < 0.7 else (y, x)
+            if a1 in CONSTS and a2 in CONSTS:
+                a1 = "v0"
+            lines.append("  %s %s, %s, %s" % (inner, t, a1, a2))
+            arms = (t, x) if rng.random() < 0.5 else (x, t)
+            lines.append("  select %s, %s, %s, %s" % (d, c, arms[0], arms[1]))
+            vals.append(t)
+            vals.append(d)
+            continue
         a = rng.choice(vals[-4:] + vals[:3])
         b = rng.choice(vals + CONSTS[:3] if rng.random() < 0.85 else CONSTS)
         if op == "not":

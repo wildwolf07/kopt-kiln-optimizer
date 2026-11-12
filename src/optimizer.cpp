@@ -1346,8 +1346,14 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             if (!buildSSA(seed->p, f, err)) continue;
             instSimplify(f); dce(f);
             bool any = false;
-            for (int r = 0; r < 3 && booleanTrees(f); ++r) { any = true; instSimplify(f); dce(f); }
+            for (int r = 0; r < 3; ++r) {
+                bool c = booleanTrees(f);
+                c |= selectIdentities(f);
+                if (!c) break;
+                any = true; instSimplify(f); dce(f);
+            }
             if (!any) continue;
+            runPipeline(f, m, opt.maxLevel, seed->flags);
             const bool scratch = canSpillToScratch(f);
             for (int mode = 0; mode < 4; ++mode) {
                 if (mode == 3 && !scratch) continue;
