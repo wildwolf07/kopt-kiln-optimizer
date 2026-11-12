@@ -1335,6 +1335,31 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         }
         for (Cand &c : pairs) cands.push_back(std::move(c));
     }
+    // Matrix-product recipes (k-major rows, shared B loads), own budget.
+    if (effort == 2 && progSize <= 400 && passEnabled("matmul")) {
+        const auto recipes = matmulAlternatives(base, m);
+        std::vector<Cand> mm;
+        for (size_t r = 0; r < recipes.size(); ++r) {
+            Cand raw; raw.p = recipes[r]; raw.what = "matmul" + std::to_string(r);
+            quick(raw); mm.push_back(raw);
+            Func f; std::string err;
+            if (recipes[r].instrCount() > 800 || !buildSSA(recipes[r], f, err)) continue;
+            instSimplify(f); dce(f);
+            const bool scratch = canSpillToScratch(f);
+            for (int mode = 0; mode < 4; ++mode) {
+                if (mode == 3 && !scratch) continue;
+                Func copy = f;
+                BackendOptions bo;
+                bo.preSchedule = mode != 0;
+                bo.bottomUpSchedule = mode == 2;
+                bo.spillToK = mode == 3;
+                Cand c; c.p = lowerToProgram(copy, m, bo);
+                c.what = raw.what + "/" + std::to_string(mode);
+                quick(c); mm.push_back(std::move(c));
+            }
+        }
+        for (Cand &c : mm) cands.push_back(std::move(c));
+    }
     // Boolean trees: cheaper exact formulas for and/or/xor (and bitwise add/sub)
     // trees over at most three operands. Final-only, so earlier seed lineages stay.
     if (effort == 2 && passEnabled("boolean")) {

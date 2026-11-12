@@ -69,6 +69,7 @@ size_t registerNames(const Program &p);
 Program lruPolish(const Program &input, const std::function<uint64_t(const Program &)> &cost,
                   size_t evaluations);
 std::vector<Program> rowPairAlternatives(const Program &in);
+std::vector<Program> matmulAlternatives(const Program &in, const Machine &m);
 bool promoteRollingLoad(Func &f);
 bool finiteInputMasksUpTo(const Program &in, std::vector<uint32_t> &masks, unsigned maxBits);
 std::vector<Program> finiteWideAlternatives(const Program &in);
