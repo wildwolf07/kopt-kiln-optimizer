@@ -126,7 +126,9 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    bottom-up scheduling and a layout alternative to at most two of its own seeds.
    Offer bounded select factoring from the best three ordinary seeds and the
    existing side seeds under 2,000 lowering units. Then offer paired-row
-   matrix/vector recipes with their own 6,000-unit budget. Then four more
+   matrix/vector recipes with their own 6,000-unit budget. For inputs through
+   400 instructions, offer matrix-product recipes (raw and four lowerings
+   each). Then four more
    final-only stages, each seeded from the best distinct candidates so far:
    boolean/select/sign rewrites (four seeds, re-running the cleanup pipeline),
    partially dead store sinking (four seeds, at most 6,000 input instructions),
@@ -215,6 +217,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
 | Header counted groups | Let D=(U-1)s. Guard bound >= INT_MIN+D, then test i < bound-D per group. | Intermediate increments cannot wrap before a skipped test. Each copy writes comparison=1. Keep the final possibly wrapping increment and original scalar exit test. |
 | Unswitching | Clone a loop and dispatch on a register the loop never writes. | Reading the invariant early cannot trap; guarded body operations stay on their selected paths and in order. |
+| Matrix-product recipes | Fresh SSA with copy/constant propagation (as for paired rows). Exactly three natural loops in a nesting chain, three conditional branches in the function (the loop tests), unit induction variables from 0 with constant bounds (rows <= 64, columns <= 8, inner <= 16), one accumulator phi starting at 0 and stepped by s + x*y or mac(x, y, s) with x and y loads, one store of the accumulator in the middle loop outside the inner one, only total pure operations otherwise, and an invariant return value. Addresses are exact affine forms in the three induction variables: A(i,k) independent of j with a positive row stride, B(k,j) independent of i, C(i,j) independent of k. Emits up to seven recipes: k-major rows (one A load feeds every column accumulator, B loads use constant addresses), two rows sharing B loads, separate names per load, a software-pipelined row with two A and two B registers, and column chunks of 1/2/4 for few registers (address temp folded into the A register; without mac the B register holds the product). | Every A, B and C word over the full index ranges is in memory and C is disjoint from A and B, so no access traps and no load can observe a store. Loads may therefore move freely. Each C word receives the same sum in the same order of k (products wrap identically), and stores happen row by row with columns ascending, so the last write to every word is unchanged. The return value depends only on parameters and literals. |
 | Boolean trees | For each and/or/xor/add/sub root, expand operands through and/or/xor (and add/sub that act bitwise, below) to at most three leaves and depth 6, then compute the 8-entry truth table. A table of minimum formula size (then depth) over all 256 three-input functions, built once by a fixpoint over and/or/xor with constants 0 and 0xFFFFFFFF, gives the replacement; it is used only when it has fewer instructions than the root plus the single-use nodes it frees. O(n) per round, at most three rounds. | Each bit of an and/or/xor tree is the same boolean function of the same bit of every leaf (the two constants are uniform), so equal truth tables mean equal 32-bit results. x + y = x | y when no assignment sets both (no carry can occur); x - y = x & ~y when every assignment setting y sets x (no borrow). The tables check these conditions over all assignments. A variable the function does not depend on may be replaced by 0. |
 | Select identity arms | select(c, op(x, a), x) becomes op(x, select(c, a, e)) and the mirrored arm order likewise, for add/sub/xor/or/shl/shr (e = 0), and (e = 0xFFFFFFFF) and mul (e = 1); commutative operations also match op(a, x). O(n). | op(x, e) = x for every x under these identities (Kiln shifts use the low five bits of the count, and 0 shifts by 0), so both select outcomes are unchanged. All operations are total. |
 | Canonical signs | lt(x, 0) becomes shr(x, 31); eq(c, 0) becomes 1 - c when c is a comparison, shr by 31, or and with 1. Followed by GVN and the cleanup pipeline. O(n). | Both forms of lt(x, 0) are the sign bit as 0 or 1. A structurally 0/1 value c gives eq(c, 0) = 1 - c. |
@@ -339,6 +342,10 @@ inputs. Neither profiles nor sampled runs establish semantic facts.
   overlapping memory ranges reject.
 - Select factoring can lengthen a dependency chain even while removing an
   operation. Candidate measurements include that cost.
+- Matrix-product recipes recognize one nest shape with constant bounds and
+  affine addresses; B depending on the row, dynamic sizes, extra effects or
+  conditional accumulation reject. Machines with tiny instruction caches may
+  still prefer the earlier candidates.
 - Join hoisting adds work to paths that do not need it. Small training wins did
   not always carry over, so it needs a 0.5% margin, and it is not applied to
   finite-domain decision graphs.

@@ -44,7 +44,9 @@ factoring and paired-row matrix/vector reuse. The `optimizer-boost` branch
 adds final-only candidate stages: boolean-tree formulas, select identity arms
 and canonical sign forms; partially dead store sinking; join hoisting above
 effectful branches; and register-touch polishing for machines that spill by
-themselves.
+themselves. The `optimizer-boost2` branch adds structurally proven
+matrix-product recipes (k-major rows, shared operand loads, column chunks for
+few registers).
 
 | Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
 |---|---:|---:|---:|---:|
@@ -95,6 +97,7 @@ python3 tests/monotone_unswitch.py --count 300
 python3 tests/pipeline_across.py --count 300
 python3 tests/late_hoist_store.py --count 300
 python3 tests/boolean_trees.py --count 400
+python3 tests/matmul_recipe.py --count 150
 ```
 
 The fuzzer includes conditional pointer cursors, counted recurrences and
