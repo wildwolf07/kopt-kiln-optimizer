@@ -141,8 +141,9 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
    until one passes. If none improves and passes, write the original input.
 
-Search effort depends on instruction count (full through 1,000, reduced through
-4,000), block/register counts (at most 256 for expanded search), and deterministic
+Search effort depends on instruction count (full through 600, reduced through
+4,000; full effort on a 1,000-instruction loop program took about 2 s of CPU on
+the development machine, too close to the 5 s wall limit on slower judges), block/register counts (at most 256 for expanded search), and deterministic
 training instruction counts (reduce above 300,000 steps; use one pipeline above
 1,000,000). These are structural/execution-count budgets, not elapsed-time tests.
 The wrapper has no timed output fallback. Diagnostic timing never selects output.

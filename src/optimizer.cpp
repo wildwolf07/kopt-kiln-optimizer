@@ -592,7 +592,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
         trainingWork += origRuns[i].status == Status::TIMEOUT ? stepLimit : origRuns[i].steps;
     // Execution counts on fixed inputs are deterministic. Expensive nested
     // loops get fewer recompilations without using a wall-clock cutoff.
-    int effort = dense ? 0 : (progSize <= 1000 ? 2 : (progSize <= 4000 ? 1 : 0));
+    int effort = dense ? 0 : (progSize <= 600 ? 2 : (progSize <= 4000 ? 1 : 0));
     if (trainingWork > 1000000) effort = 0;
     else if (trainingWork > 300000) effort = std::min(effort, 1);
     std::vector<Cand> cands;
