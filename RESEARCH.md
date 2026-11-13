@@ -202,3 +202,10 @@ trials after their budget is consumed. They preserve search lineages and final
 semantic checking. Fresh-seed fuzzing additionally found unreachable raw
 registers entering matrix preparation's SSA tables; both matrix preparers now
 skip unreachable blocks, with focused sanitizer regressions.
+
+The x86/g++11 run exposed target-dependent instruction creation in nested
+population-count and reversal emitter calls. The arguments were mathematically
+independent, but their unspecified evaluation order changed SSA value numbers
+and register scheduling. Explicit intermediate statements fix the order while
+preserving the same arithmetic DAG. Four direct loop forms check emission
+order and results against scalar bit operations and the official interpreter.

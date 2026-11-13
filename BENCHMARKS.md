@@ -18,7 +18,7 @@ and validation rejects recovery diagnostics.
 
 Each frozen compiler passed all 500 public pairs with the official interpreter,
 100 generated inputs, offset-40 held-out scoring and repeat determinism.
-The Mac/Clang and Linux/GCC15 builds produced byte-identical public outputs.
+The Mac/Clang and Linux/ARM GCC11 builds produced byte-identical public outputs.
 A separate paired comparison against the baseline also passed all 500 pairs.
 
 Held-out changes: 19 faster, 480 equal, one slower by one cycle. Sample changes:
@@ -37,16 +37,20 @@ these results do not imply dominance on every input distribution.
 
 Final frozen gates passed:
 
-- 6,000 strict fuzz programs on Mac, seed131301, and 6,000 on Linux, seed131302.
-- 1,000 further fuzz programs under ASan/UBSan, seed131305.
-- 48 saved regressions on each compiler, 500 metamorphic programs seed131303,
-  100 mutations seed131304 (8,545 cycles both versions), smoke50+4negative controls.
+- 6,000 strict fuzz programs on Mac, seed131311, and 6,000 on Linux, seed131312.
+- 1,000 further fuzz programs under ASan/UBSan, seed131315.
+- 48 saved regressions on each compiler, 500 metamorphic programs seed131313,
+  100 mutations seed131314 (8,545 cycles both versions), smoke50+4negative controls.
 - 1,200 unseen-machine pairs: zero slower-than-input outputs, zero wrapper
-  fallbacks; maximum observed wall time0.99s.
-- All 29 root suites with unchanged production, test and binary hashes.
+  fallbacks; maximum observed wall time0.93s.
+- All 30 root suites with unchanged production, test and binary hashes.
 - Direct window search:320fixtures,4,040callback candidates,52,320 independent
   official comparisons. Direct final safety:11fixtures,480 official plus480
   local comparisons; the same480 local comparisons passed under sanitizers.
+- Bit-idiom emission: four loop forms and four lowering modes, 4,096
+  independent scalar plus 4,096 official comparisons. Explicit instruction
+  creation order removes a target-dependent argument-evaluation choice that
+  previously cost nine sample cycles on hamming_dist/few_registers.
 - Cache enabled/disabled:26 byte-identical output pairs and1,281 exact-score
   hits, including active incorrect profiles and large-program bypass.
 - Recovery:44 injected process failures and4,224 official comparisons,
@@ -60,13 +64,13 @@ regressions reproduced ASan use-after-free and UBSan coefficient overflow;
 the patched fixtures pass. Earlier failed runs are not claimed as successful
 validation of the final build.
 
-Maximum public compiler CPU time was 0.876s on Mac and 0.881s on the Linux VM; maximum observed wall times were 0.884s and 0.886s.
+Maximum public compiler CPU time was 0.942s on Mac and 1.113s on the Linux VM; maximum observed wall times were 1.130s and 1.121s.
 
 The final stress programs contain100,000 straight-line and102,567 loop
-instructions. Linux first/repeat wall times were1.12/1.03s and4.25/4.01s.
-Mac first/repeat times were1.14/1.03s and3.41/3.34s. Every large output passed
+instructions. Linux first/repeat wall times were 2.06/2.14s and 9.70/9.53s.
+Mac first/repeat times were 1.83/1.92s and 6.97/6.61s. Every large output passed
 three independent official comparisons and repeat determinism. Both compilers'
-large outputs remain byte-identical to their respective main baseline. The
+large outputs remain byte-identical to their respective parent-release baseline. The
 large loop's instruction/register layouts differ between compilers; cross-
 compiler byte identity is claimed only for the500 public pairs.
 

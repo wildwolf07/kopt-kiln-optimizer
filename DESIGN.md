@@ -257,6 +257,12 @@ still contain raw register indices and must never index the SSA forwarding
 table. Unreachable pure junk does not prevent an otherwise proved matrix
 product from being recognized.
 
+Population-count and bit-reversal recipes create each intermediate instruction
+in an explicitly sequenced statement. Sibling emitter calls in C++ arguments
+have no fixed evaluation order; depending on that order previously changed
+value numbering and later scheduling on the x86 judge compiler. The formulas
+are unchanged, and direct structural/scalar tests check all four idiom forms.
+
 A final compaction stage offers exact duplicate blocks, then an alternative
 with shared identical suffixes (at least four instructions). Matches include
 opcodes, registers, literals, shift amounts and ordered targets. The entry

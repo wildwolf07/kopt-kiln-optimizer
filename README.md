@@ -36,7 +36,9 @@ complexities, safety arguments, machine dependence and limitations.
 The final release adds bounded instruction-window scheduling, reuses exact
 scores for duplicate candidates, stops candidate construction at the search
 budget, and fixes matrix-recognition arithmetic, unreachable-block SSA handling
-and store-edge memory safety.
+and store-edge memory safety. Population-count and bit-reverse emission is
+explicitly sequenced to preserve the same scheduling choices across compiler
+targets.
 Recovery after a process failure preserves an already legal input verbatim or
 expands unsupported fused instructions in a separate mode. Validation rejects
 recovery diagnostics so a fallback cannot mask a failed optimizer run.
@@ -69,9 +71,9 @@ The official kit is external and is not bundled. To run independent checks:
 ```sh
 export KIT=/path/to/LLH-26/Compilers/COMP10
 KOPT_STRICT=1 python3 tools/bench.py --machines all --random 100 --score-offset 40 --timeout 5 --jobs 1
-python3 tools/fuzz.py --count 3000 --seed 131301
+python3 tools/fuzz.py --count 3000 --seed 131311
 python3 tools/regress.py
-python3 tools/metamorph.py --count 500 --seed 131303
+python3 tools/metamorph.py --count 500 --seed 131313
 python3 tools/release_stress.py
 ```
 
@@ -83,6 +85,7 @@ python3 tests/evaluation_cache.py --kit-free
 python3 tests/fallback.py --kit-free
 python3 tests/window_polish.py --kit-free
 python3 tests/final_safety.py --kit-free
+python3 tests/bit_idiom_order.py --kit-free
 ```
 
 CI builds on Ubuntu 22.04/g++11, runs the proof suites, and checks all 500 public

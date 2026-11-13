@@ -2893,10 +2893,21 @@ bool popcountLoops(Func &f) {
         for (const Acc &a : accs) (a.rev ? anyRev : anyPop) = true;
         Opnd pop, rev;
         if (anyPop) {
-            Opnd a1 = bin(OP_SUB, X, bin(OP_AND, bin(OP_SHR, X, Opnd::cst(1)), Opnd::cst(0x55555555u)));
-            Opnd b1 = bin(OP_ADD, bin(OP_AND, a1, Opnd::cst(0x33333333u)), bin(OP_AND, bin(OP_SHR, a1, Opnd::cst(2)), Opnd::cst(0x33333333u)));
-            Opnd c1 = bin(OP_AND, bin(OP_ADD, b1, bin(OP_SHR, b1, Opnd::cst(4))), Opnd::cst(0x0F0F0F0Fu));
-            pop = bin(OP_SHR, bin(OP_MUL, c1, Opnd::cst(0x01010101u)), Opnd::cst(24));
+            // Sequence instruction creation explicitly. C++ does not choose
+            // the order of function arguments; nested sibling bin() calls
+            // otherwise change value numbering and scheduling across hosts.
+            const Opnd shifted = bin(OP_SHR, X, Opnd::cst(1));
+            const Opnd odd = bin(OP_AND, shifted, Opnd::cst(0x55555555u));
+            const Opnd a1 = bin(OP_SUB, X, odd);
+            const Opnd low = bin(OP_AND, a1, Opnd::cst(0x33333333u));
+            const Opnd highShift = bin(OP_SHR, a1, Opnd::cst(2));
+            const Opnd high = bin(OP_AND, highShift, Opnd::cst(0x33333333u));
+            const Opnd b1 = bin(OP_ADD, low, high);
+            const Opnd nibbleShift = bin(OP_SHR, b1, Opnd::cst(4));
+            const Opnd nibbleSum = bin(OP_ADD, b1, nibbleShift);
+            const Opnd c1 = bin(OP_AND, nibbleSum, Opnd::cst(0x0F0F0F0Fu));
+            const Opnd product = bin(OP_MUL, c1, Opnd::cst(0x01010101u));
+            pop = bin(OP_SHR, product, Opnd::cst(24));
         }
         if (anyRev) {
             // Swap adjacent bits, pairs, nibbles, bytes, then halves.
@@ -2904,10 +2915,15 @@ bool popcountLoops(Func &f) {
             Opnd r = X;
             for (int st = 0; st < 4; st++) {
                 const Opnd sh = Opnd::cst(1u << st);
-                r = bin(OP_OR, bin(OP_AND, bin(OP_SHR, r, sh), Opnd::cst(masks[st])),
-                        bin(OP_SHL, bin(OP_AND, r, Opnd::cst(masks[st])), sh));
+                const Opnd right = bin(OP_SHR, r, sh);
+                const Opnd low = bin(OP_AND, right, Opnd::cst(masks[st]));
+                const Opnd masked = bin(OP_AND, r, Opnd::cst(masks[st]));
+                const Opnd high = bin(OP_SHL, masked, sh);
+                r = bin(OP_OR, low, high);
             }
-            rev = bin(OP_OR, bin(OP_SHR, r, Opnd::cst(16)), bin(OP_SHL, r, Opnd::cst(16)));
+            const Opnd low = bin(OP_SHR, r, Opnd::cst(16));
+            const Opnd high = bin(OP_SHL, r, Opnd::cst(16));
+            rev = bin(OP_OR, low, high);
         }
         std::vector<std::pair<Val, Opnd>> finals;
         finals.push_back({ctl, form == 3 ? Opnd::cst(32) : Opnd::cst(0)});

@@ -66,6 +66,10 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/window_polish.py --kit-free
+      - name: Check portable bit-idiom emission order
+        env:
+          CXX: g++-11
+        run: python3 tests/bit_idiom_order.py --kit-free
       - name: Check final memory safety regressions with sanitizers
         env:
           CXX: g++-11 -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -95,9 +99,9 @@ jobs:
         run: python3 tools/bench.py --machines all --random 100 --score-offset 40 --timeout 5 --jobs 1 --save build/release-sample-cycles.json --report build/release-report.json
       - name: Check generated programs and saved regressions
         run: |
-          python3 tools/fuzz.py --count 3000 --seed 131306 --jobs 2
+          python3 tools/fuzz.py --count 3000 --seed 131316 --jobs 2
           python3 tools/regress.py
-          python3 tools/metamorph.py --count 500 --seed 131307 --jobs 2
+          python3 tools/metamorph.py --count 500 --seed 131317 --jobs 2
       - name: Check large-program time limits, semantics and determinism
         run: python3 tools/release_stress.py
       - name: Record exact outputs for cross-compiler comparison
@@ -111,3 +115,4 @@ jobs:
             build/release-report.json
             build/release-stress.json
             build/release-output-manifest.json
+            build/release-output-manifest-outputs/
