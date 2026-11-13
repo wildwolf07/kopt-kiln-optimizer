@@ -52,9 +52,9 @@ struct Nest {
         for (int i = 0; i < x->n; ++i) if (!invariant(x->a[i], depth - 1)) return false;
         return true;
     }
-    // Exact affine form over the three induction variables, in 64-bit
-    // integers; rejected unless every intermediate stays far from wrapping
-    // (checked later through the address extremes).
+    // Exact integer affine form over the three induction variables. Reject
+    // excessive coefficients before evaluating an operation: final address
+    // bounds cannot protect the recognition arithmetic from signed overflow.
     Affine affine(Opnd o, int depth = 24) {
         if (!tick(depth)) return {};
         if (o.isConst) return Affine{true, 0, 0, 0, static_cast<int64_t>(o.c)};
@@ -69,7 +69,19 @@ struct Nest {
         if (x->op != OP_ADD && x->op != OP_SUB && x->op != OP_MUL && x->op != OP_SHL && x->op != OP_ADDSH) return {};
         Affine p = affine(x->a[0], depth - 1), q = affine(x->a[1], depth - 1);
         if (!p.valid || !q.valid) return {};
-        auto scale = [](Affine v, int64_t n) { return Affine{true, v.ci * n, v.cj * n, v.ck * n, v.base * n}; };
+        constexpr int64_t limit = UINT32_MAX;
+        auto scale = [](Affine v, int64_t n) {
+            constexpr int64_t cap = UINT32_MAX;
+            if (!v.valid || n < -cap || n > cap) return Affine{};
+            const int64_t magnitude = n < 0 ? -n : n;
+            for (int64_t *part : {&v.ci, &v.cj, &v.ck, &v.base}) {
+                if (*part < -cap || *part > cap) return Affine{};
+                const int64_t absolute = *part < 0 ? -*part : *part;
+                if (magnitude && absolute > cap / magnitude) return Affine{};
+                *part *= n;
+            }
+            return v;
+        };
         auto constOnly = [](const Affine &v) { return !v.ci && !v.cj && !v.ck; };
         if (x->op == OP_SHL) {
             if (!constOnly(q) || q.base < 0 || q.base > 12) return {};
@@ -82,7 +94,11 @@ struct Nest {
         }
         if (x->op == OP_ADDSH) { if (x->k > 12) return {}; q = scale(q, int64_t{1} << x->k); }
         if (x->op == OP_SUB) q = scale(q, -1);
-        return Affine{true, p.ci + q.ci, p.cj + q.cj, p.ck + q.ck, p.base + q.base};
+        if (!q.valid) return {};
+        Affine sum{true, p.ci + q.ci, p.cj + q.cj, p.ck + q.ck, p.base + q.base};
+        for (int64_t part : {sum.ci, sum.cj, sum.ck, sum.base})
+            if (part < -limit || part > limit) return {};
+        return sum;
     }
 };
 
@@ -93,6 +109,9 @@ bool prepare(Func &f) {
         bool changed = false;
         f.resolveAll();
         for (BB &b : f.bb) {
+            // Unreachable blocks retain raw register indices after buildSSA;
+            // only live blocks carry values from this function's SSA table.
+            if (!b.alive) continue;
             for (const Inst &x : b.insts) if (x.op == OP_CONST || x.op == OP_MOV) {
                 if (!work--) return false;
                 const Opnd o = f.resolve(x.a[0]);

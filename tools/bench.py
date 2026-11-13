@@ -49,6 +49,8 @@ def run_kopt(src, machine, prof, out, identity, timeout):
     dt = time.time() - t0
     if p.returncode != 0:
         return dt, "exit %d: %s" % (p.returncode, p.stderr.strip()[-300:])
+    if "optimizer failed" in p.stderr:
+        return dt, "optimizer failure masked by wrapper fallback: " + p.stderr.strip()[-300:]
     if not os.path.exists(out):
         return dt, "no output file"
     return dt, None

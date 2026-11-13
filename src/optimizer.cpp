@@ -209,6 +209,31 @@ struct Cand {
     bool ok = false;
 };
 
+// Every field read by SimProgram, with explicit lengths and operand arities.
+// Labels and the function name do not affect execution or cycle accounting.
+std::string scoreKey(const Program &p) {
+    std::string key;
+    key.reserve(48 * p.instrCount() + 4 * p.params.size() + 4 * p.blocks.size() + 8);
+    const auto word = [&](uint32_t value) {
+        for (unsigned shift = 0; shift < 32; shift += 8)
+            key.push_back(static_cast<char>((value >> shift) & 255));
+    };
+    word(static_cast<uint32_t>(p.params.size()));
+    for (uint32_t r : p.params) word(r);
+    word(static_cast<uint32_t>(p.blocks.size()));
+    for (const Block &block : p.blocks) {
+        word(static_cast<uint32_t>(block.ins.size()));
+        for (const Instr &x : block.ins) {
+            word(x.op); word(static_cast<uint32_t>(x.nsrc)); word(static_cast<uint32_t>(x.k));
+            if (hasDest(x.op)) word(x.dst);
+            for (int a = 0; a < x.nsrc; ++a) { word(x.src[a].isReg); word(x.src[a].v); }
+            if (x.op == OP_JMP || x.op == OP_BR) word(static_cast<uint32_t>(x.target[0]));
+            if (x.op == OP_BR) word(static_cast<uint32_t>(x.target[1]));
+        }
+    }
+    return key;
+}
+
 // Side trajectory (programs derived from the pipelineAcrossLoops base; their
 // names start with "across"). Seeds of the main search never come from it;
 // stages add at most one side seed after their own seeds, and its compile
@@ -542,9 +567,28 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
     // not what a judge measures.)
     uint64_t baseCycles = 0;
     for (size_t i = 0; i < timingSample; i++) baseCycles += baseCyc[i];
+    // Different search paths often emit exactly the same candidate. Reuse its
+    // successful timing check only within this invocation, where the original,
+    // machine and all inputs are fixed. Keep every candidate and its lineage.
+    // Exact key equality resolves hash collisions; deterministic size caps
+    // bound storage, and large programs do not pay for serialization.
+    std::unordered_map<std::string, uint64_t> quickScores;
+    size_t scoreBytes = 0;
+    const bool cacheScores = progSize <= 4000 && passEnabled("evalcache");
     // Quick evaluation: behaviour and exact cycles on the timing sample.
     auto quick = [&](Cand &c) {
         PassTimer pt("quickcheck");
+        std::string key;
+        if (cacheScores && c.p.instrCount() <= 2000 && c.p.params.size() <= 256) {
+            key = scoreKey(c.p);
+            const auto hit = quickScores.find(key);
+            if (hit != quickScores.end()) {
+                c.ok = true;
+                c.cycles = hit->second;
+                if (opt.verbose) fprintf(stderr, "kopt: reused exact score for %s\n", c.what.c_str());
+                return;
+            }
+        }
         SimProgram sc(c.p);
         c.ok = true;
         c.cycles = 0;
@@ -560,6 +604,11 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
                 return;
             }
             c.cycles += sc.cycles(b.trace, m);
+        }
+        if (!key.empty() && quickScores.size() < 2048 &&
+            key.size() <= 8 * 1024 * 1024 - scoreBytes) {
+            scoreBytes += key.size();
+            quickScores.emplace(std::move(key), c.cycles);
         }
         if (opt.verbose)
             fprintf(stderr, "kopt: %-22s cycles %8llu (input %llu), %zu instrs, %d regs\n", c.what.c_str(),
@@ -1534,6 +1583,39 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
             if (printProgram(q) == printProgram(seed->p)) continue;
             Cand c; c.p = std::move(q); c.flags = seed->flags; c.what = seed->what + "/lru";
             quick(c); polished.push_back(std::move(c));
+        }
+        for (Cand &c : polished) cands.push_back(std::move(c));
+    }
+    // Final local rotations can cross a cost plateau that adjacent swaps
+    // cannot. Each crossed pair must commute in raw-register semantics. Keep
+    // all earlier candidates and search lineages; no recompilation here.
+    if (effort == 2 && passEnabled("windowpolish")) {
+        const auto seeds = bestDistinct(cands, 2);
+        uint64_t trainingSteps = 1;
+        for (size_t i = 0; i < timingSample && i < origRuns.size(); ++i)
+            trainingSteps += origRuns[i].steps;
+        size_t work = 0;
+        std::vector<Cand> polished;
+        for (const Cand *seed : seeds) {
+            const size_t size = seed->p.instrCount();
+            if (size > 400) continue;
+            const size_t evals = static_cast<size_t>(std::min<uint64_t>(
+                std::min<size_t>(240, 24000 / (size + 20)), 8000000ull / trainingSteps));
+            if (evals < 2 || work + evals > 480) continue;
+            work += evals;
+            uint64_t bestScore = seed->cycles;
+            auto cost = [&](const Program &q) {
+                Cand c; c.p = q; quick(c);
+                if (c.ok) bestScore = std::min(bestScore, c.cycles);
+                return c.ok ? c.cycles : UINT64_MAX;
+            };
+            Program q = windowPolish(seed->p, cost, evals);
+            if (printProgram(q) == printProgram(seed->p)) continue;
+            Cand c; c.p = std::move(q); c.flags = seed->flags; c.what = seed->what + "/window";
+            // The returned program is the best callback result, already
+            // checked and scored within the stage's evaluation budget.
+            c.ok = true; c.cycles = bestScore;
+            polished.push_back(std::move(c));
         }
         for (Cand &c : polished) cands.push_back(std::move(c));
     }

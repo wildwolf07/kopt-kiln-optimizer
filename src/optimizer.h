@@ -22,5 +22,7 @@ std::string optimizeProgram(const std::string &origText, const Program &orig, co
 
 // Make a program legal for the machine (expand mac/addsh when not available).
 Program legalize(const Program &p, const Machine &m);
+// Rename registers and remap blocks without changing execution semantics.
+Program canonicalize(const Program &p);
 
 }  // namespace kopt

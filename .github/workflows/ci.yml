@@ -58,3 +58,56 @@ jobs:
         env:
           CXX: g++-11
         run: python3 tests/row_pairs.py --kit-free --quick
+      - name: Check exact-score caching and machine-legal recovery
+        run: |
+          python3 tests/evaluation_cache.py --kit-free
+          python3 tests/fallback.py --kit-free
+      - name: Check raw-register window scheduling
+        env:
+          CXX: g++-11
+        run: python3 tests/window_polish.py --kit-free
+      - name: Check final memory safety regressions with sanitizers
+        env:
+          CXX: g++-11 -fsanitize=address,undefined -fno-omit-frame-pointer
+          ASAN_OPTIONS: detect_leaks=0
+        run: python3 tests/final_safety.py --kit-free
+  release-sweep:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      CXX: g++-11
+      KOPT_STRICT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the release on Linux x86-64
+        run: |
+          test "$RUNNER_ARCH" = X64
+          g++-11 --version
+          ./build.sh
+          printf '%s\n' "KIT=$RUNNER_TEMP/official-kit/Compilers/COMP10" "KOPT_EXEC=$GITHUB_WORKSPACE/build/kopt-bin" "KOPT_BIN=$GITHUB_WORKSPACE/build/kopt-bin" >> "$GITHUB_ENV"
+      - name: Obtain the unchanged official test oracle
+        run: |
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/rudra-shroff06/LLH-26.git "$RUNNER_TEMP/official-kit"
+          git -C "$RUNNER_TEMP/official-kit" sparse-checkout init --cone
+          git -C "$RUNNER_TEMP/official-kit" sparse-checkout set Compilers/COMP10
+          git -C "$RUNNER_TEMP/official-kit" checkout --quiet --detach 05b1aa7445770408bb4307c7f8c8999b502c0a6f
+      - name: Check all 500 public pairs under the normal time limit
+        run: python3 tools/bench.py --machines all --random 100 --score-offset 40 --timeout 5 --jobs 1 --save build/release-sample-cycles.json --report build/release-report.json
+      - name: Check generated programs and saved regressions
+        run: |
+          python3 tools/fuzz.py --count 3000 --seed 131306 --jobs 2
+          python3 tools/regress.py
+          python3 tools/metamorph.py --count 500 --seed 131307 --jobs 2
+      - name: Check large-program time limits, semantics and determinism
+        run: python3 tools/release_stress.py
+      - name: Record exact outputs for cross-compiler comparison
+        run: python3 tools/output_manifest.py --label linux-x86-gcc11 --jobs 1 --timeout 5 --output build/release-output-manifest.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-x86-measurements
+          path: |
+            build/release-sample-cycles.json
+            build/release-report.json
+            build/release-stress.json
+            build/release-output-manifest.json

@@ -1,177 +1,104 @@
 # kopt: the Kiln optimizer
 
-A C++17 optimizer for COMP10 “Oxygen Debt”, using SSA analysis, machine-aware
-lowering and deterministic candidate search. No runtime dependencies beyond the
-standard library.
+A standalone C++17 optimizer for COMP10 “Oxygen Debt”. It combines SSA analysis,
+source-derived algebraic rewrites, machine-aware scheduling and register
+allocation, and deterministic search with an exact copy of the Kiln cycle model.
+
+## Build and run
+
+From the repository root:
 
 ```sh
 ./build.sh
-./kopt IN.kir --machine MACHINE.cfg [--profile PROFILE.prof] -o OUT.kir
+./kopt INPUT.kir --machine MACHINE.cfg -o OUTPUT.kir
+./kopt INPUT.kir --machine MACHINE.cfg --profile PROFILE.prof -o OUTPUT.kir
 ```
 
-Build with g++ 11 or newer, or `CXX=clang++ ./build.sh`. The executable wrapper
-works from any current directory. Normal execution writes only the named output.
+Requires only g++ 11 or newer (or `CXX=clang++ ./build.sh`) and the C++ standard
+library. No package installation or network access is needed. The executable
+wrapper works from any current directory, including paths containing spaces.
+Normal execution writes only the requested output file. Profiles are optional
+hints; incorrect hints do not establish any semantic facts.
 
-## Public benchmark evidence
+## What is implemented
 
-Cycles summed over the 100 kit sample inputs per machine, using the official
-interpreter/timing model. These are aggregate ratios, not geometric means or
-hidden-test predictions. The `optimizer-integrated` candidate combines the
-core at `64574bd`, memory-fact scheduling from `e818222`, and additional tested
-allocation, counted-loop, layout and correctness changes. The `optimizer-best`
-branch adds loop-nest flattening, irreducible-cycle splitting, closed forms
-for summation loops, population-count and bit-reverse idioms, state-machine
-dispatch tables, division by constants, min/max and Horner regrouping,
-counting selects, load phis, store selects, return-block copying and
-profile-guided timing inputs. The `optimizer-frontier` branch combines
-`optimizer-next` at `8a818d6` with spill-slot sharing and larger-program
-allocation from `58b5077`, pressure-aware scheduling, pure-region tree ordering,
-and bounded rematerialization. The `optimizer-forge` branch builds on `f6088bb` with backward scheduling,
-pure instruction sinking, source-derived finite-domain specialization, and a
-range-cache lifetime fix. The `optimizer-apex` branch builds on `dac7d75`: large-function lazy
-coalescing and local analysis refresh reduce compile work; backward bit-demand
-proofs and packed lookup alternatives cover additional finite computations.
-The vector stage adds exact bit-affine synthesis and final layout polishing.
-This `optimizer-stream` branch starts from integrated main `a3e67fe`, preserving
-its later speculation and store rewrites. It adds the previously validated wide
-finite-domain and constant-load splitting candidates, followed by exact rolling
-load reuse with bounded unrolling and scheduling alternatives. The
-`optimizer-sieve` branch adds cross-iteration load pipelining over inner loops
-(as a separate candidate trajectory) and monotone loop unswitching. The
-`optimizer-packed` branch builds on that revision with packed counters for
-bounded indexed increments. The `optimizer-matrix` candidate adds select
-factoring and paired-row matrix/vector reuse. The `optimizer-boost` branch
-adds final-only candidate stages: boolean-tree formulas, select identity arms
-and canonical sign forms; partially dead store sinking; join hoisting above
-effectful branches; and register-touch polishing for machines that spill by
-themselves. The `optimizer-boost2` branch adds structurally proven
-matrix-product recipes (k-major rows, shared operand loads, column chunks for
-few registers). The `optimizer-boost4` branch extends those recipes to 16
-columns and to long-running products searched at reduced effort.
+The optimizer includes constant/range propagation, value numbering, memory
+forwarding, loop-invariant motion, counted-loop formulas, population-count and
+bit-reverse idioms, finite-domain and bit-affine synthesis, constant division,
+loop rotation/unrolling/flattening/unswitching, branch/store predication,
+rolling load reuse, packed indexed counters, and proved matrix/vector and
+matrix-product recipes. Backend alternatives cover pressure-aware forward and
+backward scheduling, shared spill slots, rematerialization and register-touch
+search. Every transformation works from the supplied program, without program
+name matching or stored kernel answers. [DESIGN.md](DESIGN.md) gives pass order,
+complexities, safety arguments, machine dependence and limitations.
 
-| Machine | Original KIR | Starting optimizer da2928e | This candidate | Speedup vs original |
-|---|---:|---:|---:|---:|
-| default | 103,671 | 16,527 | 8,529 | 12.16x |
-| few_registers | 202,164 | 25,592 | 13,589 | 14.88x |
-| no_fused | 107,966 | 20,218 | 10,386 | 10.40x |
-| slow_memory | 111,254 | 24,319 | 11,993 | 9.28x |
-| wide_fast | 55,744 | 12,923 | 6,625 | 8.41x |
+The final release adds bounded instruction-window scheduling, reuses exact
+scores for duplicate candidates, stops candidate construction at the search
+budget, and fixes matrix-recognition arithmetic, unreachable-block SSA handling
+and store-edge memory safety.
+Recovery after a process failure preserves an already legal input verbatim or
+expands unsupported fused instructions in a separate mode. Validation rejects
+recovery diagnostics so a fallback cannot mask a failed optimizer run.
 
-Every program/machine pair is checked against the kit on its sample plus 100
-additional inputs, and optimized twice for determinism. Individual programs can
-get slower; inspect per-program comparisons as well as totals.
+## Measured public results
+
+Official interpreter and cycle model, 100 public programs on each machine.
+Sample totals are sums; held-out speedups are geometric means over programs,
+using eight generated inputs starting at offset 40 with seed 12345 + 7919.
+These measurements are evidence about the public tests, not hidden-score
+predictions.
+
+| Machine | Original sample cycles | Release sample cycles | Held-out geometric speedup |
+|---|---:|---:|---:|
+| default | 103,671 | 8,525 | 7.790x |
+| few_registers | 202,164 | 13,589 | 11.560x |
+| no_fused | 107,966 | 10,379 | 7.093x |
+| slow_memory | 111,254 | 11,987 | 6.842x |
+| wide_fast | 55,744 | 6,625 | 5.472x |
+
+Against main `2400069`, held-out cycles improve on 19 pairs, tie on 480 and
+increase by one cycle on one pair. All five aggregate held-out totals improve.
+[BENCHMARKS.md](BENCHMARKS.md) records individual changes and tradeoffs;
+`results/release-validation.json` identifies the tested source and binaries.
 
 ## Validation
 
-Kit-free checks, also available on Ubuntu 22.04/g++ 11 CI:
-
-```sh
-python3 tools/smoke.py
-python3 tests/pressure.py
-python3 tests/wide_finite.py --kit-free
-python3 tests/load_rematerialize.py --kit-free
-python3 tests/rolling_load.py --kit-free
-python3 tests/packed_counts.py --kit-free
-python3 tests/select_factor.py --kit-free
-python3 tests/row_pairs.py --kit-free --quick
-```
-
-The smoke suite covers arithmetic, loops, guarded division, memory, scratch,
-volatile operations and traps, plus four deliberately corrupted negative
-controls. Dense-pressure tests compare against a separate arithmetic oracle
-and exercise bounded search/graph construction.
-
-Independent kit checks (the kit is not bundled):
+The official kit is external and is not bundled. To run independent checks:
 
 ```sh
 export KIT=/path/to/LLH-26/Compilers/COMP10
-python3 tools/bench.py --machines all --random 50
-python3 tools/fuzz.py --count 2000 --seed 1205
-python3 tools/metamorph.py --count 1000 --seed 1206
+KOPT_STRICT=1 python3 tools/bench.py --machines all --random 100 --score-offset 40 --timeout 5 --jobs 1
+python3 tools/fuzz.py --count 3000 --seed 131301
 python3 tools/regress.py
-CXX=clang++ python3 tests/arithmetic_compact.py
-CXX=clang++ python3 tests/signed_pow2.py
-CXX=clang++ python3 tests/counted_loops.py --integrated-bin build/kopt-bin
-python3 tests/unswitch_pipeline.py
-python3 tests/packed_counts.py
-python3 tests/monotone_unswitch.py --count 300
-python3 tests/pipeline_across.py --count 300
-python3 tests/late_hoist_store.py --count 300
-python3 tests/boolean_trees.py --count 400
-python3 tests/matmul_recipe.py --count 150
+python3 tools/metamorph.py --count 500 --seed 131303
+python3 tools/release_stress.py
 ```
 
-The fuzzer includes conditional pointer cursors, counted recurrences and
-literal-driven rare inputs. Metamorphic testing renames registers, shuffles
-blocks, changes constants and varies machines. Counted/unswitch tests inspect
-all dumped candidates as well as winners, so fallback cannot mask a bad
-transformation. Regression `.in` files preserve rare arguments that ordinary
-fixed-seed testing can miss.
+Kit-free checks include:
 
-## Design and diagnostics
+```sh
+python3 tools/smoke.py
+python3 tests/evaluation_cache.py --kit-free
+python3 tests/fallback.py --kit-free
+python3 tests/window_polish.py --kit-free
+python3 tests/final_safety.py --kit-free
+```
 
-[DESIGN.md](DESIGN.md) explains every pass, safety argument and limitation.
+CI builds on Ubuntu 22.04/g++11, runs the proof suites, and checks all 500 public
+pairs, generated programs and large-program time limits against a pinned copy
+of the official oracle. The test kit is downloaded only by CI; the optimizer
+and its build script do not use the network.
 
-- `KOPT_VERBOSE=1`: candidate cycles and chosen candidate.
-- `KOPT_STRICT=1`: fail on a candidate self-check mismatch.
-- `KOPT_DUMP=DIR`: dump candidates for development.
-- `KOPT_TIMING=1`: diagnostic timings only; never changes selection.
-- `KOPT_DISABLE=PASS`: disable passes for debugging.
-- `./build/kopt-bin --sim P.kir --machine M.cfg --input I.in`: exact cycle breakdown.
+## Diagnostics and limits
 
-Training runs and self-checks are finite safeguards. Transformations still need
-semantic justification, and passing tests cannot guarantee a hidden-test score.
-There is no wall-clock-based choice of output or timed fallback.
+`KOPT_VERBOSE=1` reports choices; `KOPT_STRICT=1` fails on a self-check mismatch;
+`KOPT_DUMP=DIR` writes development candidates; `KOPT_TIMING=1` reports timing
+without affecting decisions; `KOPT_DISABLE=PASS` supports controlled comparisons.
+Use `./build/kopt-bin --sim P.kir --machine M.cfg --input I.in` for cycle details.
 
-For actual randomized scoring beyond the generator's fixed edge prefix, run
-`python3 tools/bench.py --machines all --score-offset 40`. The historical
-default offset is zero and covers eight edge inputs, regardless of seed.
-`KOPT_EXEC=/absolute/path/to/another/kopt` selects a separate baseline executable
-without rebuilding or changing either checkout.
-
-New arithmetic candidates share a quotient/remainder pair using the exact
-wrapping identity, and lower signed power-of-two operations using unsigned
-magnitudes (including INT_MIN). Original candidates remain available. Exact
-duplicate-block sharing and bounded common-suffix sharing can reduce cache
-pressure; the cycle model includes any extra jumps.
-
-Pressure scheduling tracks values needed by successor blocks and later scheduling
-windows. Pure-region tree ordering reduces long live ranges without crossing
-memory or trapping operations. Rematerialization duplicates only a bounded
-number of cheap parameter-based expressions, with guards against extending
-parameter lifetimes. These are measured alternatives, not unconditional choices.
-See [BENCHMARKS.md](BENCHMARKS.md) for paired results and individual regressions.
-
-Backward scheduling offers a second direction through the existing dependence
-graph. Pure sinking delays single-user expressions without crossing unsafe
-loop boundaries. Finite-domain specialization proves that a pure function
-depends on at most six input bits in the earlier stage or ten in a separate
-final stage, exhaustively evaluates that complete domain,
-and emits a reduced decision graph. It derives every table from the supplied
-program at runtime; it has no stored program answers. [RESEARCH.md](RESEARCH.md)
-records the references, independent adaptations and rejected experiments.
-
-The apex baseline preserved forge's practice-suite cycle totals. That stage
-improved compiler throughput and generated recurrences whose relevant input
-bits become visible only through final masks. `tools/finite_sweep.py`
-reproduces the complete-optimizer comparison. The lookup values always come
-from exhaustive evaluation of the program supplied on the command line.
-
-The bit-affine alternative proves XOR/shift/selection expressions for every
-input using GF(2) coefficient forms, then emits a branch-free matrix. It does
-not guess linearity from sample executions. Unsupported or nonlinear expressions
-retain earlier candidates. `tools/affine_sweep.py` checks complete optimizers on
-independently generated CRC-style and XOR/shift kernels; `tests/bit_affine.py`
-validates the pass directly against the official interpreter.
-
-Rolling memory reuse proves that the next iteration's first read is already
-available from a successful load or store in the preceding iteration. It keeps
-all stores, uses a valid constant-address initial read, and carries the proved
-value through a phi. Unknown aliases, effects, unsupported recurrences and
-complex loop shapes reject. Bounded unrolling and loads-only scheduling follow
-as separate candidates. `tools/rolling_sweep.py` checks generated sorting
-kernels with varied bases, strides and orderings against a baseline executable.
-
-`tools/bench.py --report /tmp/report.json` records full per-case cycle and
-held-out data, compiler CPU time and wall time. CPU diagnostics help distinguish
-contention from compiler work; the contest still enforces wall-clock limits.
+Search budgets depend on program structure and fixed inputs, never the clock.
+Candidates receive finite self-checks before output. Tests and sampled checks
+cannot prove arbitrary equivalence or guarantee a hidden-test score. Conservative
+proof gates reject unsupported shapes, and an aggregate training win can still
+cost more for a different input distribution. See section 7 of DESIGN.md.

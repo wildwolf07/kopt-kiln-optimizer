@@ -2,22 +2,10 @@
 # kopt - the Kiln optimizer.
 #   kopt IN.kir --machine MACHINE.cfg [--profile PROFILE.prof] -o OUT.kir
 # Runs the compiled optimizer (build with ./build.sh). If it fails for any
-# reason, the input program is written out unchanged, which is always legal.
+# reason, a fresh invocation expands unsupported fused operations in the input
+# and writes that equivalent fallback without entering the optimizer.
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 if "$DIR/build/kopt-bin" "$@"; then
     exit 0
 fi
-IN=""
-OUT=""
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -o) OUT="$2"; shift 2 ;;
-        --machine|--profile) shift 2 ;;
-        *) [ -z "$IN" ] && IN="$1"; shift ;;
-    esac
-done
-if [ -n "$IN" ] && [ -n "$OUT" ] && cp "$IN" "$OUT"; then
-    echo "kopt: optimizer failed, wrote the input unchanged" >&2
-    exit 0
-fi
-exit 1
+exec "$DIR/build/kopt-bin" --fallback "$@"

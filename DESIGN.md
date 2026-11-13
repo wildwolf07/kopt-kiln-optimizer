@@ -136,7 +136,10 @@ rank candidates (section 6). Finite self-checking is not a proof of equivalence.
    join hoisting (four seeds, same budget; a result enters selection only when
    it beats the best training total by more than 0.5%), and register-touch
    polishing for programs that name more registers than the machine keeps
-   (two seeds, at most 3,000 candidate evaluations). These final stages
+   (two seeds, at most 3,000 candidate evaluations). A final raw-register
+   scheduling search rotates an instruction across up to three independent
+   neighbors, using at most 480 evaluations and three accepted moves per seed.
+   These final stages
    retain all earlier candidates and search paths.
    Measure alternatives with the exact same cycle model.
 7. Sort by training cycles (ties: fewer instructions), then check improving candidates on additional inputs
@@ -216,9 +219,9 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Pure instruction sinking | Move single-user nontrapping pure instructions just before their user, possibly into a dominated block. Pin phi users; forbid loop-depth increases, movement into another loop and cross-block irreducible moves. Iterative dependency-forest rewrite; value scans O(n), CFG analyses bounded to 256 blocks, 100k instructions and 300k values. | Operands must dominate the destination. Single-user chains move together without cloning; pure operations may cross effects because they cannot affect them or trap. Moves never increase loop nesting. |
 | Rematerialization | Offer at most 64 copies of cheap one-instruction parameter/constant recipes with 2–8 separated instruction users; O(n) scanning and fixed-budget cloning. No phi users; no GVN afterward. | Immutable leaves dominate every use. No effects/traps. Each parameter already has an independent use at/after the clone in its block, excluding all recipe definitions, so moving recipes does not invalidate the lifetime guard. |
 | Rotation/unroll/peel/thread | Duplicate/register-form blocks and redirect edges; O(n·U) within code-growth budgets. | Each new path executes the same original instructions, except tests established redundant. |
-| Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
-| Header counted groups | Let D=(U-1)s. Guard bound >= INT_MIN+D, then test i < bound-D per group. | Intermediate increments cannot wrap before a skipped test. Each copy writes comparison=1. Keep the final possibly wrapping increment and original scalar exit test. |
-| Unswitching | Clone a loop and dispatch on a register the loop never writes. | Reading the invariant early cannot trap; guarded body operations stay on their selected paths and in order. |
+| Latch counted groups | Guard the positive step, safe bound subtraction and enough remaining iterations; retain scalar fallback/remainder. After CFG/loop analysis, O(n² + U·n) scanning and copying, with fixed unroll factor U and bounded generated code. | No skipped latch exit test may be false; preserve comparison writes and the body/effect order. Variable steps have runtime validity guards. |
+| Header counted groups | Let D=(U-1)s. Guard bound >= INT_MIN+D, then test i < bound-D per group. After CFG/loop analysis, O(n² + U·n), with fixed U and code-growth limits. | Intermediate increments cannot wrap before a skipped test. Each copy writes comparison=1. Keep the final possibly wrapping increment and original scalar exit test. |
+| Unswitching | Clone a loop and dispatch on a register the loop never writes. After CFG/loop analysis, O(n² + g) scanning and copying, where g is generated code; code-growth and per-loop limits bound g. | Reading the invariant early cannot trap; guarded body operations stay on their selected paths and in order. |
 | Matrix-product recipes | Fresh SSA with copy/constant propagation (as for paired rows). Exactly three natural loops in a nesting chain, three conditional branches in the function (the loop tests), unit induction variables from 0 with constant bounds (rows <= 64, columns <= 16, inner <= 16), one accumulator phi starting at 0 and stepped by s + x*y or mac(x, y, s) with x and y loads, one store of the accumulator in the middle loop outside the inner one, only total pure operations otherwise, and an invariant return value. Addresses are exact affine forms in the three induction variables: A(i,k) independent of j with a positive row stride, B(k,j) independent of i, C(i,j) independent of k. Emits up to seven recipes: k-major rows (one A load feeds every column accumulator, B loads use constant addresses), two rows sharing B loads, separate names per load, a software-pipelined row with two A and two B registers, and column chunks of 1/2/4 for few registers (address temp folded into the A register; without mac the B register holds the product). | Every A, B and C word over the full index ranges is in memory and C is disjoint from A and B, so no access traps and no load can observe a store. Loads may therefore move freely. Each C word receives the same sum in the same order of k (products wrap identically), and stores happen row by row with columns ascending, so the last write to every word is unchanged. The return value depends only on parameters and literals. |
 | Boolean trees | For each and/or/xor/add/sub root, expand operands through and/or/xor (and add/sub that act bitwise, below) to at most three leaves and depth 6, then compute the 8-entry truth table. A table of minimum formula size (then depth) over all 256 three-input functions, built once by a fixpoint over and/or/xor with constants 0 and 0xFFFFFFFF, gives the replacement; it is used only when it has fewer instructions than the root plus the single-use nodes it frees. O(n) per round, at most three rounds. | Each bit of an and/or/xor tree is the same boolean function of the same bit of every leaf (the two constants are uniform), so equal truth tables mean equal 32-bit results. x + y = x | y when no assignment sets both (no carry can occur); x - y = x & ~y when every assignment setting y sets x (no borrow). The tables check these conditions over all assignments. A variable the function does not depend on may be replaced by 0. |
 | Select identity arms | select(c, op(x, a), x) becomes op(x, select(c, a, e)) and the mirrored arm order likewise, for add/sub/xor/or/shl/shr (e = 0), and (e = 0xFFFFFFFF) and mul (e = 1); commutative operations also match op(a, x). O(n). | op(x, e) = x for every x under these identities (Kiln shifts use the low five bits of the count, and 0 shifts by 0), so both select outcomes are unchanged. All operations are total. |
@@ -226,6 +229,7 @@ inputs. Analyses with iteration/path limits abandon deductions when not establis
 | Partially dead stores | Fresh SSA with IV ranges and signed VRP. A store whose address is proven in memory moves past the rest of its block to each successor edge on which the same word is not certainly written again first; it is deleted when every successor path writes it again. The search looks through the successor and at most one empty jump block. Up to four rounds. | The moved store passes only instructions that cannot read its word, cannot trap (divisors proven nonzero, other addresses proven in memory) and are not volatile, return or trap. On the overwriting path nothing between the two stores can read the word or stop the program, so the final word and every trap state are unchanged. Possibly trapping stores never move. Word equality is checked frame-correctly: phis of the entered block are replaced by their values on that edge, values recomputed in that block are treated as unknown, and every compared base names the same dynamic instance. |
 | Join hoisting | Two transforms, at most three rounds: (1) a branch arm with only total pure work and a jump to a join (not the other arm, not already a successor) is emptied into the branch block, which then targets the join; the join's phis take the moved values on the new edge. (2) Total pure work of a block whose immediate dominator ends in a branch and lies in the same innermost loop moves into that dominator when its operands are available there (at most 64 per round). | Only operations without traps, memory or volatile effects move, so they may also run on paths that do not use them. The dominator reaches every use, so each moved value is defined where it is read. The redirected edge carries the same values into the join. |
 | Register-touch polishing | Only when the program names more registers than the machine keeps. Deterministic first-improvement search over two edits: swap the read operands of add/mul/and/or/xor/eq and the first two of mac, or insert `mov r, r` before an instruction. Each edit is kept only if the exact cycle model improves on the training inputs; at most eight rounds and a per-seed evaluation budget of min(1,500, 60,000/(size+20), 40,000,000/(training steps)). Edits also swap two adjacent instructions when neither reads or writes the other's destination and at most one may trap or touch memory. | Commutative operand order and `mov r, r` change only which registers the machine touches and evicts, never a value. Candidates are still self-checked. |
+| Final window scheduling | At most 400 raw-register instructions. Try moving one instruction across one to three neighbors in the same block; every crossed pair must commute. At most three accepted moves per seed, with min(240, 24,000/(n+20), 8,000,000/training steps) evaluations and at most 480 evaluations across seeds. Work is O(E·(n+T)) for E evaluations and T simulated training steps, plus fixed-width scans. | Preserve every instruction, terminator and raw-register RAW/WAR/WAW dependence. An explicit total-operation allowlist permits at most one memory/volatile/potentially trapping operation in each crossed pair. Equal or worse aggregate costs retain the input. |
 | Monotone unswitching | Innermost reducible loops only, one branch per loop, loop size at most the unroll budget. The branch condition must be a pure non-trapping expression computed in its own block (at most 32 operand visits); its leaf registers may be written only in blocks that the other successor T (single predecessor: the branch block) dominates within one iteration (DFS from the header that avoids T and back edges). | Once the stable side is taken, T does not run for the rest of that iteration, so no leaf changes; by induction every later evaluation in this loop instance sees the same leaves and takes the same side. The stable edge therefore enters a clone of the loop where the branch is a jump. Entry from outside always reaches the original, so each loop instance starts with the full test. All instructions keep their order on every path. |
 | Return copying | A jump to a return block of at most 3 instructions takes a copy of it; a branch to two identical such blocks becomes a jump; mov a,s; ret a becomes ret s; unreachable blocks are dropped. | Text copy of the executed instructions minus one jump. |
 | Unread spill stores | Remove stores to scratch spill words that no load reads (K-name allocation only). | All original addresses were proven below 3072, so only spill code touches scratch. |
@@ -241,6 +245,17 @@ magnitude. Constant zero and +/-1 divisors retain their existing treatment.
 Only cheaper-latency expansions are offered, and pre-scheduled and ordinary
 lowerings are compared. These transformations are O(n log n) for local pairing
 and O(n) for power-of-two expansion, before normal lowering costs.
+
+Matrix-product recognition includes the SSA and CFG analyses above, bounded
+copy/phi propagation (50,000 work units), and at most 20,000 expression visits.
+After recognition, recipe emission is O(g), where g is emitted instructions:
+each of at most seven recipes contains O(columns·inner) work with fixed caps
+of 16 on both dimensions. Address coefficients are bounded before each
+arithmetic operation; excessive expressions reject before signed overflow.
+Copy/phi preparation inspects only reachable SSA blocks. Unreachable blocks
+still contain raw register indices and must never index the SSA forwarding
+table. Unreachable pure junk does not prevent an otherwise proved matrix
+product from being recognized.
 
 A final compaction stage offers exact duplicate blocks, then an alternative
 with shared identical suffixes (at least four instructions). Matches include
@@ -314,6 +329,25 @@ Compile work is bounded without the clock. A meter counts instructions lowered
 side trajectory (section 2, step 5) has its own 60,000-unit meter. The
 count depends only on the input, so both judge runs give the same file.
 
+Successful quick evaluations are memoized within one optimizer invocation.
+The key includes parameter order, block and instruction lengths, opcodes,
+operand arities and values, destinations, shifts and jump targets: every field
+read by the simulator. Names and labels do not affect execution. Hash
+collisions still require full key equality. The machine, original results and
+training inputs are fixed for the entire cache lifetime. At most 2,048 keys
+and 8 MiB of key bytes are retained; programs above 4,000 instructions and
+candidates above 2,000 bypass caching. Serialization is O(n); the cache only
+reuses a completed successful evaluation, never removes a candidate or changes
+search work meters. Register-touch search also stops constructing candidates
+as soon as its evaluation budget is exhausted.
+
+If the optimizer process fails, the launcher invokes a separate fallback mode.
+It preserves an already legal input verbatim; otherwise it canonicalizes the
+register names and expands unsupported MAC/ADDSH operations without optimization,
+preserving behavior and machine legality.
+The fallback writes only the requested output and emits a failure diagnostic;
+benchmarks reject that diagnostic so recovery cannot mask a test failure.
+
 ## 6. Profiles
 
 The profile only changes which inputs rank the candidates; it never changes
@@ -355,6 +389,9 @@ inputs. Neither profiles nor sampled runs establish semantic facts.
   machines with costly taken branches the original form usually wins.
 - Register-touch polishing is a local search with a fixed budget and two
   edits; it does not reallocate registers.
+- Final window scheduling is also local: it crosses at most three neighbors
+  and never exchanges two effectful or possibly trapping operations. A win on
+  the fixed training inputs can still cost more on another input distribution.
 
 - Packed count writeback has a fixed cost. Very short loops can take more
   cycles even when the candidate wins on the training inputs as a whole.

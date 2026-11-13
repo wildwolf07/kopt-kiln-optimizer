@@ -187,3 +187,18 @@ A direct counter-based bracket-depth rewrite was evaluated and deferred.
 It replaced the maximum update with an increment when the depth equaled the
 previous maximum. The extra predicates and live values increased held-out
 cycles on four of five machines.
+
+The release's final local scheduling stage moves one instruction across up to
+three neighbors in the same raw-register block. Each crossed pair must commute:
+no RAW/WAR/WAW conflict, no terminator, and at most one memory, volatile or
+potentially trapping operation. Evaluating the whole move can cross a local
+cost plateau where every adjacent swap is unprofitable. Three strictly
+improving moves per seed and a fixed evaluation budget bound the search.
+This is an independent implementation derived from those pairwise conditions.
+
+Compiler-work reductions reuse only successful exact evaluations of identical
+generated candidates within one invocation, and stop constructing register-touch
+trials after their budget is consumed. They preserve search lineages and final
+semantic checking. Fresh-seed fuzzing additionally found unreachable raw
+registers entering matrix preparation's SSA tables; both matrix preparers now
+skip unreachable blocks, with focused sanitizer regressions.

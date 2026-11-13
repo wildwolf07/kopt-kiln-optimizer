@@ -4926,7 +4926,7 @@ bool sinkDeadStores(Func &f) {
         for (int b = 0; b < static_cast<int>(f.bb.size()) && !any; ++b) {
             BB &B = f.bb[b];
             if (!B.alive) continue;
-            for (size_t i = 0; i + 1 < B.insts.size() && !any; ++i) {
+            for (size_t i = 0; !any && i + 1 < B.insts.size(); ++i) {
                 const Inst st = B.insts[i];
                 if (st.op != OP_STORE) continue;
                 const Opnd addr = f.resolve(st.a[0]);
@@ -5010,6 +5010,8 @@ bool sinkDeadStores(Func &f) {
                 }
                 f.rebuildPreds();
                 any = changed = true;
+                // Edge insertion may have reallocated f.bb, invalidating B.
+                break;
             }
         }
         if (!any) break;

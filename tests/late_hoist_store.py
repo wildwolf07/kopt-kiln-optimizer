@@ -23,7 +23,7 @@ KIT = Path(os.environ.get("KIT", ROOT.parent / "official-LLH-26/Compilers/COMP10
 sys.path.insert(0, str(KIT))
 import kirlib as K  # noqa: E402
 
-TAGS = ("/joinhoist", "/deadstore", "/lru")
+TAGS = ("/joinhoist", "/deadstore", "/lru", "/window")
 REGS = ["v1", "v2", "v3", "v4", "v5", "v6"]
 
 

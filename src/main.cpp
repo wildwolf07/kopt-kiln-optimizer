@@ -181,9 +181,11 @@ int main(int argc, char **argv) {
     if (argc >= 2 && std::string(argv[1]) == "--check") return checkMode(argc, argv);
 
     std::string in, out, machine, profile;
+    bool fallbackOnly = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
-        if (a == "--machine" && i + 1 < argc) machine = argv[++i];
+        if (a == "--fallback") fallbackOnly = true;
+        else if (a == "--machine" && i + 1 < argc) machine = argv[++i];
         else if (a == "--profile" && i + 1 < argc) profile = argv[++i];
         else if (a == "-o" && i + 1 < argc) out = argv[++i];
         else if (in.empty() && !a.empty() && a[0] != '-') in = a;
@@ -198,6 +200,15 @@ int main(int argc, char **argv) {
     std::string err;
     if (!parseProgram(inText, prog, err)) die(in + ": " + err);
     Machine m = loadMachine(machine);
+    if (fallbackOnly) {
+        bool unsupported = false;
+        for (const Block &block : prog.blocks) for (const Instr &x : block.ins)
+            unsupported |= (x.op == OP_MAC && !m.fused_mac) || (x.op == OP_ADDSH && !m.fused_addsh);
+        const std::string fallback = unsupported ? printProgram(legalize(canonicalize(prog), m)) : inText;
+        if (!writeFile(out, fallback)) die("cannot write " + out);
+        fprintf(stderr, "kopt: optimizer failed, wrote a machine-legal fallback\n");
+        return 0;
+    }
     std::string profText;
     if (!profile.empty() && !readFile(profile, profText)) profText.clear();  // a bad profile is only a hint
 

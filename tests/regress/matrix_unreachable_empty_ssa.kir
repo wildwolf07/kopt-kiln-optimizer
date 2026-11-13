@@ -1,0 +1,25 @@
+func f()
+b0:
+  const v8, 3
+  mov v1, v7
+  ret v7
+b1:
+  mov v7, 3
+  and v5, v3, 7
+  load v5, v5
+  mul v7, 2147483647, 4095
+  const v1, 33
+  eq v4, 2147483647, v5
+  br v2, b3, b2
+b2:
+  store 0, 2
+  jmp b3
+b3:
+  xor v0, 4096, v0
+  load v2, 0
+  addsh v3, v7, v1, 31
+  mov v5, v0
+  addsh v1, 31, v2, 4
+  select v3, v7, v1, v6
+  select v2, 16, v1, 16
+  ret -2147483648

@@ -1,3 +1,83 @@
+# Submission release validation — 13 November
+
+The release starts from main `2400069` and retains all previous algorithms.
+It adds a final bounded instruction-window search and reduces redundant
+compiler work. It also fixes three memory-safety classes: unchecked matrix
+coefficients, a stale block reference during store sinking, and unreachable
+raw registers entering the SSA forwarding table. Both matrix preparers now
+skip unreachable blocks. The launcher produces machine-legal recovery output,
+and validation rejects recovery diagnostics.
+
+| Machine | Main sample | Release sample | Main held-out | Release held-out | Release held-out geo |
+|---|---:|---:|---:|---:|---:|
+| default | 8,529 | 8,525 | 48,985 | 48,950 | 7.790 |
+| few_registers | 13,589 | 13,589 | 81,157 | 81,153 | 11.560 |
+| no_fused | 10,386 | 10,379 | 60,211 | 60,077 | 7.093 |
+| slow_memory | 11,993 | 11,987 | 71,961 | 71,894 | 6.842 |
+| wide_fast | 6,625 | 6,625 | 37,608 | 37,606 | 5.472 |
+
+Each frozen compiler passed all 500 public pairs with the official interpreter,
+100 generated inputs, offset-40 held-out scoring and repeat determinism.
+The Mac/Clang and Linux/GCC15 builds produced byte-identical public outputs.
+A separate paired comparison against the baseline also passed all 500 pairs.
+
+Held-out changes: 19 faster, 480 equal, one slower by one cycle. Sample changes:
+seven faster, 492 equal, one slower by one cycle. The regression is
+`dead_mod_in_loop` on no_fused: sample31→32, held-out351→352. All five
+aggregate held-out totals improve. The search uses fixed training inputs;
+these results do not imply dominance on every input distribution.
+
+| Kernel and machine | Held-out before → after |
+|---|---:|
+| rle_encode, no_fused | 835 → 777 |
+| histogram, slow_memory | 2,062 → 2,022 |
+| matvec8, no_fused | 2,140 → 2,106 |
+| alias_stores, default | 1,416 → 1,388 |
+| merge_sorted, no_fused | 1,797 → 1,778 |
+
+Final frozen gates passed:
+
+- 6,000 strict fuzz programs on Mac, seed131301, and 6,000 on Linux, seed131302.
+- 1,000 further fuzz programs under ASan/UBSan, seed131305.
+- 48 saved regressions on each compiler, 500 metamorphic programs seed131303,
+  100 mutations seed131304 (8,545 cycles both versions), smoke50+4negative controls.
+- 1,200 unseen-machine pairs: zero slower-than-input outputs, zero wrapper
+  fallbacks; maximum observed wall time0.99s.
+- All 29 root suites with unchanged production, test and binary hashes.
+- Direct window search:320fixtures,4,040callback candidates,52,320 independent
+  official comparisons. Direct final safety:11fixtures,480 official plus480
+  local comparisons; the same480 local comparisons passed under sanitizers.
+- Cache enabled/disabled:26 byte-identical output pairs and1,281 exact-score
+  hits, including active incorrect profiles and large-program bypass.
+- Recovery:44 injected process failures and4,224 official comparisons,
+  including disabled fused operations, highest valid register names, effects,
+  traps, exact preservation of legal input, and repeat determinism.
+
+The first fresh fuzz run found two exits at seed131301 cases520/2557.
+ASan identified unreachable raw-register indices used as SSA values. Both
+saved cases and direct empty-SSA fixtures pass after the fix. Separate old-source
+regressions reproduced ASan use-after-free and UBSan coefficient overflow;
+the patched fixtures pass. Earlier failed runs are not claimed as successful
+validation of the final build.
+
+Maximum public compiler CPU time was 0.876s on Mac and 0.881s on the Linux VM; maximum observed wall times were 0.884s and 0.886s.
+
+The final stress programs contain100,000 straight-line and102,567 loop
+instructions. Linux first/repeat wall times were1.12/1.03s and4.25/4.01s.
+Mac first/repeat times were1.14/1.03s and3.41/3.34s. Every large output passed
+three independent official comparisons and repeat determinism. Both compilers'
+large outputs remain byte-identical to their respective main baseline. The
+large loop's instruction/register layouts differ between compilers; cross-
+compiler byte identity is claimed only for the500 public pairs.
+
+`results/release-validation.json` records the frozen hashes and checks;
+`release-benchmark-report.json` contains every public row and compiler timing;
+`release-output-manifest.json` contains all500 output hashes. CI additionally
+runs the pinned official oracle and large tests on Ubuntu22.04/g++11 x86-64.
+Its final status must be checked before submission.
+
+---
+
 # optimizer-boost4 validation
 
 This candidate starts from main `495f87b`. Matrix-product recipes now accept

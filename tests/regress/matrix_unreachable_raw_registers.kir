@@ -1,0 +1,29 @@
+func f(v0, v1)
+b0:
+  const v9, 3
+  and v6, v7, 63
+  store v6, v0
+  mov v3, v5
+  add v1, v7, v0
+  select v2, v0, v4, v3
+  ret v1
+b1:
+  xor v8, 16, -8
+  load v5, 64
+  add v2, v5, v0
+  jmp b2
+b2:
+  addsh v5, v4, v7, 24
+  lt v6, v6, v4
+  lt v5, v8, 65535
+  mov v4, 255
+  and v6, v0, 4095
+  eq v8, v3, 4242
+  br v5, b3, b1
+b3:
+  mov v5, v7
+  shl v1, v6, v7
+  or v2, -8, v1
+  and v6, v4, 255
+  load v3, v6
+  ret v5

@@ -104,6 +104,8 @@ bool prepare(Func &f) {
         bool changed = false;
         f.resolveAll();
         for (BB &b : f.bb) {
+            // buildSSA renames only reachable blocks.
+            if (!b.alive) continue;
             for (const Inst &x : b.insts) if (x.op == OP_CONST || x.op == OP_MOV) {
                 if (!work--) return false;
                 const Opnd o = f.resolve(x.a[0]);
@@ -157,7 +159,8 @@ bool recognize(const Program &in, Recipe &r) {
     if (f.bb[oh].phis.size() != 1 || f.bb[ih].phis.size() != 2) return false;
     for (int b : {0,init,body,store,exit}) if (!f.bb[b].phis.empty()) return false;
     r.defs.assign(f.nvals, nullptr);
-    for (const BB &b : f.bb) for (const Inst &x : b.insts) if (x.dst >= 0) r.defs[x.dst] = &x;
+    for (const BB &b : f.bb) if (b.alive)
+        for (const Inst &x : b.insts) if (x.dst >= 0) r.defs[x.dst] = &x;
     const Inst *ot = r.def(f.bb[oh].term().a[0]), *it = r.def(f.bb[ih].term().a[0]);
     const Val row = f.bb[oh].phis[0].dst;
     if (!ot || !it || ot->op != OP_LT || it->op != OP_LT || ot->a[0] != Opnd::val(row) || it->a[0].isConst) return false;
